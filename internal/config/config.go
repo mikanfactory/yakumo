@@ -49,7 +49,7 @@ func ResolveConfigPath(flagPath string) (string, error) {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}
 
-	defaultPath := filepath.Join(home, ".config", "denpasar", "config.yaml")
+	defaultPath := filepath.Join(home, ".config", "shiki", "config.yaml")
 	if _, err := os.Stat(defaultPath); err != nil {
 		return "", fmt.Errorf("default config not found at %s: create it or use --config flag", defaultPath)
 	}

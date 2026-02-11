@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"worktree-ui/internal/model"
@@ -103,46 +104,63 @@ repositories: []
 }
 
 func TestResolveConfigPath(t *testing.T) {
-	tests := []struct {
-		name     string
-		flagPath string
-		wantErr  bool
-	}{
-		{
-			name:     "explicit path exists",
-			flagPath: "", // will be set in test body
-			wantErr:  false,
-		},
-		{
-			name:     "explicit path not exists",
-			flagPath: "/nonexistent/path.yaml",
-			wantErr:  true,
-		},
-	}
+	t.Run("explicit path exists", func(t *testing.T) {
+		dir := t.TempDir()
+		flagPath := filepath.Join(dir, "config.yaml")
+		if err := os.WriteFile(flagPath, []byte("repositories:\n  - name: x\n    path: /x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			flagPath := tt.flagPath
-			if tt.name == "explicit path exists" {
-				dir := t.TempDir()
-				flagPath = filepath.Join(dir, "config.yaml")
-				if err := os.WriteFile(flagPath, []byte("repositories:\n  - name: x\n    path: /x"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
+		result, err := ResolveConfigPath(flagPath)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result != flagPath {
+			t.Errorf("result = %q, want %q", result, flagPath)
+		}
+	})
 
-			result, err := ResolveConfigPath(flagPath)
-			if tt.wantErr && err == nil {
-				t.Error("expected error, got nil")
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if !tt.wantErr && result != flagPath {
-				t.Errorf("result = %q, want %q", result, flagPath)
-			}
-		})
-	}
+	t.Run("explicit path not exists", func(t *testing.T) {
+		_, err := ResolveConfigPath("/nonexistent/path.yaml")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("default path exists", func(t *testing.T) {
+		tmpHome := t.TempDir()
+		t.Setenv("HOME", tmpHome)
+
+		configDir := filepath.Join(tmpHome, ".config", "shiki")
+		if err := os.MkdirAll(configDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		configPath := filepath.Join(configDir, "config.yaml")
+		if err := os.WriteFile(configPath, []byte("repositories:\n  - name: x\n    path: /x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		result, err := ResolveConfigPath("")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result != configPath {
+			t.Errorf("result = %q, want %q", result, configPath)
+		}
+	})
+
+	t.Run("default path not exists", func(t *testing.T) {
+		tmpHome := t.TempDir()
+		t.Setenv("HOME", tmpHome)
+
+		_, err := ResolveConfigPath("")
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "default config not found") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
 }
 
 func TestLoad(t *testing.T) {
