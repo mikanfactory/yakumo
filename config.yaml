@@ -1,0 +1,5 @@
+sidebar_width: 30
+
+repositories:
+  - name: shiki
+    path: /Users/shoji/code/shiki
