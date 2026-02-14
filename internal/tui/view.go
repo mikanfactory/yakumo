@@ -55,7 +55,7 @@ func renderItem(item model.NavigableItem, selected bool, width int) string {
 	case model.ItemKindWorktree:
 		return renderWorktree(item, selected, width)
 
-	case model.ItemKindAddRepo, model.ItemKindSettings:
+	case model.ItemKindAddWorktree, model.ItemKindAddRepo, model.ItemKindSettings:
 		return renderAction(item, selected)
 
 	default:

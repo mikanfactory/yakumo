@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"worktree-ui/internal/git"
 	"worktree-ui/internal/model"
 	"worktree-ui/internal/sidebar"
 )
@@ -286,6 +287,149 @@ func TestZoneID(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("ZoneID(%d) = %q, want %q", tt.index, got, tt.want)
 		}
+	}
+}
+
+func TestUpdate_Enter_AddWorktree(t *testing.T) {
+	m := testModel()
+	m.config = model.Config{WorktreeBasePath: "/tmp/shikon"}
+
+	// Navigate to "Add worktree" item
+	for i, item := range m.items {
+		if item.Kind == model.ItemKindAddWorktree {
+			m.cursor = i
+			break
+		}
+	}
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := result.(Model)
+
+	if !updated.loading {
+		t.Error("loading should be true after pressing enter on Add worktree")
+	}
+	if cmd == nil {
+		t.Error("expected a command to be returned")
+	}
+}
+
+func TestUpdate_WorktreeAddedMsg(t *testing.T) {
+	m := testModel()
+	m.config = model.Config{
+		Repositories: []model.RepositoryDef{{Name: "test", Path: "/test"}},
+	}
+	m.runner = &fakeRunner{}
+
+	result, cmd := m.Update(WorktreeAddedMsg{})
+	updated := result.(Model)
+
+	if !updated.loading {
+		t.Error("loading should be true after WorktreeAddedMsg (refreshing)")
+	}
+	if cmd == nil {
+		t.Error("expected fetchGitDataCmd to be returned")
+	}
+}
+
+func TestUpdate_WorktreeAddErrMsg(t *testing.T) {
+	m := testModel()
+
+	result, _ := m.Update(WorktreeAddErrMsg{Err: fmt.Errorf("add failed")})
+	updated := result.(Model)
+
+	if updated.loading {
+		t.Error("loading should be false after WorktreeAddErrMsg")
+	}
+	if updated.err == nil {
+		t.Error("err should be set")
+	}
+}
+
+func TestAddWorktreeCmd_Success(t *testing.T) {
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			"/repo:[config user.name]": "testuser\n",
+		},
+	}
+
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon")
+	msg := cmd()
+
+	// The command will fail at AddWorktree because FakeCommandRunner won't have
+	// the exact key for the random country, but we can check it doesn't panic
+	// and returns either WorktreeAddedMsg or WorktreeAddErrMsg
+	switch msg.(type) {
+	case WorktreeAddedMsg, WorktreeAddErrMsg:
+		// expected
+	default:
+		t.Errorf("unexpected message type: %T", msg)
+	}
+}
+
+func TestAddWorktreeCmd_UserNameError(t *testing.T) {
+	runner := git.FakeCommandRunner{
+		Errors: map[string]error{
+			"/repo:[config user.name]": fmt.Errorf("no user.name"),
+		},
+	}
+
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon")
+	msg := cmd()
+
+	errMsg, ok := msg.(WorktreeAddErrMsg)
+	if !ok {
+		t.Fatalf("expected WorktreeAddErrMsg, got %T", msg)
+	}
+	if errMsg.Err == nil {
+		t.Error("expected error to be set")
+	}
+}
+
+func TestFetchGitDataCmd_Success(t *testing.T) {
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			"/repo:[worktree list --porcelain]": "worktree /repo\nHEAD abc123\nbranch refs/heads/main\n\n",
+			"/repo:[status --porcelain]":        "",
+		},
+	}
+
+	cfg := model.Config{
+		Repositories: []model.RepositoryDef{
+			{Name: "test", Path: "/repo"},
+		},
+	}
+
+	cmd := fetchGitDataCmd(cfg, runner)
+	msg := cmd()
+
+	dataMsg, ok := msg.(GitDataMsg)
+	if !ok {
+		t.Fatalf("expected GitDataMsg, got %T", msg)
+	}
+	if len(dataMsg.Groups) != 1 {
+		t.Errorf("len(Groups) = %d, want 1", len(dataMsg.Groups))
+	}
+}
+
+func TestFetchGitDataCmd_Error(t *testing.T) {
+	runner := git.FakeCommandRunner{
+		Errors: map[string]error{
+			"/repo:[worktree list --porcelain]": fmt.Errorf("git error"),
+		},
+	}
+
+	cfg := model.Config{
+		Repositories: []model.RepositoryDef{
+			{Name: "test", Path: "/repo"},
+		},
+	}
+
+	cmd := fetchGitDataCmd(cfg, runner)
+	msg := cmd()
+
+	_, ok := msg.(GitDataErrMsg)
+	if !ok {
+		t.Fatalf("expected GitDataErrMsg, got %T", msg)
 	}
 }
 

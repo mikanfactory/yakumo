@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
@@ -18,6 +19,14 @@ type GitDataMsg struct {
 
 // GitDataErrMsg is sent when git data fetching fails.
 type GitDataErrMsg struct {
+	Err error
+}
+
+// WorktreeAddedMsg is sent when a new worktree has been created.
+type WorktreeAddedMsg struct{}
+
+// WorktreeAddErrMsg is sent when worktree creation fails.
+type WorktreeAddErrMsg struct {
 	Err error
 }
 
@@ -69,6 +78,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		return m, nil
 
+	case WorktreeAddedMsg:
+		m.loading = true
+		return m, fetchGitDataCmd(m.config, m.runner)
+
+	case WorktreeAddErrMsg:
+		m.err = msg.Err
+		m.loading = false
+		return m, nil
+
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionRelease && msg.Button == tea.MouseButtonLeft {
 			for i, item := range m.items {
@@ -80,6 +98,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if item.Kind == model.ItemKindWorktree {
 						m.selected = item.WorktreePath
 						return m, tea.Quit
+					}
+					if item.Kind == model.ItemKindAddWorktree {
+						m.loading = true
+						return m, addWorktreeCmd(m.runner, item.RepoRootPath, m.config.WorktreeBasePath)
 					}
 					return m, nil
 				}
@@ -100,9 +122,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = NextSelectable(m.items, m.cursor)
 
 		case "enter":
-			if m.cursor < len(m.items) && m.items[m.cursor].Kind == model.ItemKindWorktree {
-				m.selected = m.items[m.cursor].WorktreePath
-				return m, tea.Quit
+			if m.cursor < len(m.items) {
+				item := m.items[m.cursor]
+				if item.Kind == model.ItemKindWorktree {
+					m.selected = item.WorktreePath
+					return m, tea.Quit
+				}
+				if item.Kind == model.ItemKindAddWorktree {
+					m.loading = true
+					return m, addWorktreeCmd(m.runner, item.RepoRootPath, m.config.WorktreeBasePath)
+				}
 			}
 		}
 	}
@@ -113,6 +142,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // ZoneID returns the bubblezone ID for an item at the given index.
 func ZoneID(index int) string {
 	return fmt.Sprintf("item-%d", index)
+}
+
+func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath string) tea.Cmd {
+	return func() tea.Msg {
+		userName, err := git.GetUserName(runner, repoPath)
+		if err != nil {
+			return WorktreeAddErrMsg{Err: err}
+		}
+
+		country := git.RandomCountry()
+		slug := git.Slugify(country)
+		branch := userName + "/" + slug
+		newPath := filepath.Join(basePath, slug)
+
+		if err := git.AddWorktree(runner, repoPath, newPath, branch); err != nil {
+			return WorktreeAddErrMsg{Err: err}
+		}
+
+		return WorktreeAddedMsg{}
+	}
 }
 
 func fetchGitDataCmd(cfg model.Config, runner git.CommandRunner) tea.Cmd {
