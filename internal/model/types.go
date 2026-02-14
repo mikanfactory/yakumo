@@ -2,8 +2,9 @@ package model
 
 // Config represents the application configuration loaded from YAML.
 type Config struct {
-	SidebarWidth int             `yaml:"sidebar_width"`
-	Repositories []RepositoryDef `yaml:"repositories"`
+	SidebarWidth    int             `yaml:"sidebar_width"`
+	Repositories    []RepositoryDef `yaml:"repositories"`
+	WorktreeBasePath string         `yaml:"worktree_base_path"`
 }
 
 // RepositoryDef represents a repository entry from config.
@@ -40,6 +41,7 @@ type ItemKind int
 const (
 	ItemKindGroupHeader ItemKind = iota
 	ItemKindWorktree
+	ItemKindAddWorktree
 	ItemKindAddRepo
 	ItemKindSettings
 )
@@ -50,5 +52,6 @@ type NavigableItem struct {
 	Label        string
 	Selectable   bool
 	WorktreePath string
+	RepoRootPath string
 	Status       StatusInfo
 }
