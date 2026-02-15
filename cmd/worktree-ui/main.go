@@ -45,7 +45,7 @@ func main() {
 
 	if tmux.IsInsideTmux() {
 		tmuxRunner := tmux.OSRunner{}
-		if err := tmux.SelectWorktreeWindow(tmuxRunner, selected); err != nil {
+		if _, err := tmux.SelectWorktreeSession(tmuxRunner, selected); err != nil {
 			fmt.Fprintf(os.Stderr, "tmux error: %v\n", err)
 			os.Exit(1)
 		}
