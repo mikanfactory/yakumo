@@ -5,9 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"worktree-ui/internal/git"
+	"worktree-ui/internal/github"
 )
 
 // === Tab ===
@@ -19,6 +23,8 @@ const (
 	TabChanges
 	TabChecks
 )
+
+const pollInterval = 5 * time.Second
 
 // === Data Types ===
 
@@ -54,6 +60,26 @@ type PRComment struct {
 	Preview string
 }
 
+// === Messages ===
+
+type ChangesDataMsg struct {
+	Files []ChangedFile
+}
+
+type ChangesDataErrMsg struct {
+	Err error
+}
+
+type ChecksDataMsg struct {
+	Checks ChecksModel
+}
+
+type ChecksDataErrMsg struct {
+	Err error
+}
+
+type TickMsg time.Time
+
 // === Sub-Models ===
 
 type AllFilesModel struct {
@@ -67,6 +93,8 @@ type ChangesModel struct {
 	files     []ChangedFile
 	cursor    int
 	scrollOff int
+	loading   bool
+	err       error
 }
 
 type ChecksModel struct {
@@ -78,6 +106,8 @@ type ChecksModel struct {
 	comments      []PRComment
 	todos         []string
 	scrollOff     int
+	loading       bool
+	err           error
 }
 
 // === Main Model ===
@@ -87,6 +117,10 @@ type Model struct {
 	width     int
 	height    int
 	quitting  bool
+
+	repoDir   string
+	gitRunner git.CommandRunner
+	ghRunner  github.Runner
 
 	allFiles AllFilesModel
 	changes  ChangesModel
@@ -172,7 +206,7 @@ var (
 			Background(lipgloss.Color("236"))
 )
 
-// === Dummy Data ===
+// === Static Data ===
 
 func dummyFileTree() []FileNode {
 	return []FileNode{
@@ -188,47 +222,72 @@ func dummyFileTree() []FileNode {
 	}
 }
 
-func dummyChangedFiles() []ChangedFile {
-	return []ChangedFile{
-		{Path: "backend/app/db/repositories/scheduled_job_repository.py", Additions: 44, Deletions: 4},
-		{Path: "backend/app/generated/models.py", Additions: 14, Deletions: 20},
-		{Path: "backend/app/jobs/agent_routine.py", Additions: 0, Deletions: 10},
-		{Path: "backend/app/models/schedule_context.py", Additions: 0, Deletions: 15},
-		{Path: "backend/app/routers/chats/converters.py", Additions: 11, Deletions: 15},
-		{Path: "backend/app/routers/chats/router.py", Additions: 54, Deletions: 4},
-		{Path: "backend/app/services/agent_service.py", Additions: 0, Deletions: 3},
-		{Path: "backend/app/services/agents/session_service.py", Additions: 0, Deletions: 5},
-		{Path: "backend/db/schema.sql", Additions: 1, Deletions: 0},
-		{Path: "backend/tests/integration/test_chats_api.py", Additions: 91, Deletions: 22},
-		{Path: "backend/tests/unit/test_db/test_scheduled_job_repository.py", Additions: 198, Deletions: 7},
-		{Path: "backend/tests/unit/test_jobs/test_agent_routine.py", Additions: 0, Deletions: 97},
-		{Path: "backend/tests/unit/test_routers/test_chats/test_converters.py", Additions: 15, Deletions: 18},
-		{Path: "backend/tests/unit/test_routers/test_chats/test_router.py", Additions: 37, Deletions: 38},
-		{Path: "backend/tests/unit/test_services/test_agent_service.py", Additions: 2, Deletions: 32},
-		{Path: "frontend/src/features/chat/components/Chat/Composer.tsx", Additions: 2, Deletions: 12},
-		{Path: "frontend/src/features/chat/components/Layout/SideBar/SideBar.test.tsx", Additions: 16, Deletions: 84},
-		{Path: "frontend/src/features/chat/components/Layout/SideBar/SideBar.tsx", Additions: 8, Deletions: 28},
-		{Path: "frontend/src/generated/api-types.ts", Additions: 14, Deletions: 27},
+// === Data Fetching Commands ===
+
+func fetchChangesCmd(runner git.CommandRunner, dir string) tea.Cmd {
+	return func() tea.Msg {
+		entries, err := git.GetDiffNumstat(runner, dir, "origin/main")
+		if err != nil {
+			return ChangesDataErrMsg{Err: err}
+		}
+		files := make([]ChangedFile, len(entries))
+		for i, e := range entries {
+			files[i] = ChangedFile{
+				Path:      e.Path,
+				Additions: e.Additions,
+				Deletions: e.Deletions,
+			}
+		}
+		return ChangesDataMsg{Files: files}
 	}
 }
 
-func dummyChecksModel() ChecksModel {
-	return ChecksModel{
-		prTitle:       "refactor: normalize Session-ScheduledJob relationship",
-		prDescription: "## What\n\nSession と ScheduledJob の関連付けを、クライアントサイドの `recurring_job_id` セッション状態保存方式から、サーバーサイドの `job_parameters.session.session_id` による JOIN 方式に変更。\n\n## Why\n\n- セッション状態に `recurring_job_id` を保存する方式は、AgentRoutine 実行後にクライアントから `updateChat` を呼ぶ必要があり、データ整合性が保証しづらかった\n- `schedule_context` もセッション状態への埋め込みで正規化されていなかった\n- `job_parameters.session.session_id` はジョブ作成時に必ず設定されるため、これをキーにサーバーサイド JOIN することで単一の信頼できるソースとなる",
-		gitStatus:     "Ready to merge",
-		commitsBehind: 17,
-		checks: []CheckResult{
-			{Name: "Backend Quality Checks", Passed: true, Duration: "3m"},
-			{Name: "Frontend Quality Checks", Passed: true, Duration: "1m"},
-			{Name: "Check Generated Code Sync", Passed: true, Duration: "40s"},
-		},
-		comments: []PRComment{
-			{Author: "greptile-apps", Preview: "<h2>Greptile Overview</h2> <h3>Greptile Summary</..."},
-		},
-		todos:    []string{},
-		scrollOff: 0,
+func fetchChecksCmd(ghRunner github.Runner, gitRunner git.CommandRunner, dir string) tea.Cmd {
+	return func() tea.Msg {
+		pr, err := github.FetchPR(ghRunner, dir)
+		if err != nil {
+			return ChecksDataErrMsg{Err: err}
+		}
+
+		commitsBehind, _ := git.GetCommitsBehind(gitRunner, dir, "origin/main")
+
+		checks := make([]CheckResult, len(pr.StatusCheckRollup))
+		for i, sc := range pr.StatusCheckRollup {
+			checks[i] = CheckResult{
+				Name:     sc.CheckName(),
+				Passed:   sc.Passed(),
+				Duration: sc.DurationString(),
+			}
+		}
+
+		comments := make([]PRComment, len(pr.Comments))
+		for i, c := range pr.Comments {
+			comments[i] = PRComment{
+				Author:  c.Author.Login,
+				Preview: c.Preview(80),
+			}
+		}
+
+		gitStatus := github.MapMergeStateStatus(pr.MergeStateStatus, pr.ReviewDecision)
+
+		return ChecksDataMsg{
+			Checks: ChecksModel{
+				prTitle:       pr.Title,
+				prDescription: pr.Body,
+				gitStatus:     gitStatus,
+				commitsBehind: commitsBehind,
+				checks:        checks,
+				comments:      comments,
+				todos:         []string{},
+			},
+		}
 	}
+}
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(pollInterval, func(t time.Time) tea.Msg {
+		return TickMsg(t)
+	})
 }
 
 // === Tree Flattening ===
@@ -450,6 +509,16 @@ func (m ChangesModel) update(msg tea.KeyMsg) ChangesModel {
 }
 
 func (m ChangesModel) view(width, height int) string {
+	if m.loading {
+		return filePathDimStyle.Render("  Loading changes...")
+	}
+	if m.err != nil {
+		return filePathDimStyle.Render(fmt.Sprintf("  Error: %s", m.err.Error()))
+	}
+	if len(m.files) == 0 {
+		return filePathDimStyle.Render("  No changes")
+	}
+
 	m.scrollOff = adjustScroll(m.cursor, m.scrollOff, height, len(m.files))
 
 	var lines []string
@@ -526,6 +595,13 @@ func (m ChecksModel) update(msg tea.KeyMsg) ChecksModel {
 }
 
 func (m ChecksModel) view(width, height int) string {
+	if m.loading {
+		return filePathDimStyle.Render("  Loading PR data...")
+	}
+	if m.err != nil {
+		return filePathDimStyle.Render(fmt.Sprintf("  Error: %s", m.err.Error()))
+	}
+
 	var allLines []string
 
 	// PR Title
@@ -625,25 +701,34 @@ func (m ChecksModel) view(width, height int) string {
 
 // === Init / Update / View ===
 
-func initialModel() Model {
+func initialModel(repoDir string, gitRunner git.CommandRunner, ghRunner github.Runner) Model {
 	tree := dummyFileTree()
 	return Model{
 		activeTab: TabAllFiles,
 		width:     80,
 		height:    24,
+		repoDir:   repoDir,
+		gitRunner: gitRunner,
+		ghRunner:  ghRunner,
 		allFiles: AllFilesModel{
 			nodes:     tree,
 			flatNodes: flattenTree(tree, 0, nil),
 		},
 		changes: ChangesModel{
-			files: dummyChangedFiles(),
+			loading: true,
 		},
-		checks: dummyChecksModel(),
+		checks: ChecksModel{
+			loading: true,
+		},
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tea.Batch(
+		fetchChangesCmd(m.gitRunner, m.repoDir),
+		fetchChecksCmd(m.ghRunner, m.gitRunner, m.repoDir),
+		tickCmd(),
+	)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -653,6 +738,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case ChangesDataMsg:
+		m.changes = ChangesModel{
+			files:     msg.Files,
+			cursor:    m.changes.cursor,
+			scrollOff: m.changes.scrollOff,
+		}
+		return m, nil
+
+	case ChangesDataErrMsg:
+		m.changes.loading = false
+		m.changes.err = msg.Err
+		return m, nil
+
+	case ChecksDataMsg:
+		msg.Checks.scrollOff = m.checks.scrollOff
+		m.checks = msg.Checks
+		return m, nil
+
+	case ChecksDataErrMsg:
+		m.checks.loading = false
+		m.checks.err = msg.Err
+		return m, nil
+
+	case TickMsg:
+		return m, tea.Batch(
+			fetchChangesCmd(m.gitRunner, m.repoDir),
+			fetchChecksCmd(m.ghRunner, m.gitRunner, m.repoDir),
+			tickCmd(),
+		)
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -661,11 +776,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % 3
-			return m, nil
+			return m, tea.Batch(
+				fetchChangesCmd(m.gitRunner, m.repoDir),
+				fetchChecksCmd(m.ghRunner, m.gitRunner, m.repoDir),
+			)
 
 		case "shift+tab":
 			m.activeTab = (m.activeTab + 2) % 3
-			return m, nil
+			return m, tea.Batch(
+				fetchChangesCmd(m.gitRunner, m.repoDir),
+				fetchChecksCmd(m.ghRunner, m.gitRunner, m.repoDir),
+			)
 
 		case "1":
 			m.activeTab = TabAllFiles
@@ -745,8 +866,17 @@ func (m Model) renderTabBar() string {
 // === Main ===
 
 func main() {
+	dir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("error:", err)
+		os.Exit(1)
+	}
+
+	gitRunner := git.OSCommandRunner{}
+	ghRunner := github.OSRunner{}
+
 	p := tea.NewProgram(
-		initialModel(),
+		initialModel(dir, gitRunner, ghRunner),
 		tea.WithAltScreen(),
 	)
 	if _, err := p.Run(); err != nil {
