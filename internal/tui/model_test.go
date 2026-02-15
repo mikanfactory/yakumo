@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,6 +13,7 @@ import (
 	"worktree-ui/internal/git"
 	"worktree-ui/internal/model"
 	"worktree-ui/internal/sidebar"
+	"worktree-ui/internal/tmux"
 )
 
 func testModel() Model {
@@ -155,7 +157,7 @@ func TestUpdate_GitDataMsg(t *testing.T) {
 		},
 	}
 
-	result, _ := m.Update(GitDataMsg{Groups: groups})
+	result, cmd := m.Update(GitDataMsg{Groups: groups})
 	updated := result.(Model)
 
 	if updated.loading {
@@ -166,6 +168,9 @@ func TestUpdate_GitDataMsg(t *testing.T) {
 	}
 	if len(updated.groups) != 1 {
 		t.Errorf("len(groups) = %d, want 1", len(updated.groups))
+	}
+	if cmd == nil {
+		t.Error("expected agentTickCmd to be returned after GitDataMsg")
 	}
 }
 
@@ -199,7 +204,7 @@ func TestNewModel(t *testing.T) {
 	}
 	runner := &fakeRunner{}
 
-	m := NewModel(cfg, runner, "/tmp/config.yaml")
+	m := NewModel(cfg, runner, "/tmp/config.yaml", nil)
 
 	if m.sidebarWidth != 35 {
 		t.Errorf("sidebarWidth = %d, want 35", m.sidebarWidth)
@@ -220,7 +225,7 @@ func TestInit_ReturnsCmd(t *testing.T) {
 		},
 	}
 	runner := &fakeRunner{}
-	m := NewModel(cfg, runner, "")
+	m := NewModel(cfg, runner, "", nil)
 
 	cmd := m.Init()
 	if cmd == nil {
@@ -805,6 +810,113 @@ func TestAddRepoToConfigCmd_Error(t *testing.T) {
 
 	if _, ok := msg.(RepoAddErrMsg); !ok {
 		t.Fatalf("expected RepoAddErrMsg, got %T", msg)
+	}
+}
+
+func TestUpdate_AgentTickMsg_WithRunner(t *testing.T) {
+	m := testModel()
+	m.tmuxRunner = &tmux.FakeRunner{
+		Errors: map[string]error{},
+	}
+
+	result, cmd := m.Update(AgentTickMsg(time.Now()))
+	_ = result.(Model)
+
+	if cmd == nil {
+		t.Error("expected fetchAgentStatusCmd to be returned")
+	}
+}
+
+func TestUpdate_AgentTickMsg_WithoutRunner(t *testing.T) {
+	m := testModel()
+	m.tmuxRunner = nil
+
+	result, cmd := m.Update(AgentTickMsg(time.Now()))
+	_ = result.(Model)
+
+	if cmd == nil {
+		t.Error("expected agentTickCmd to be returned even without runner")
+	}
+}
+
+func TestUpdate_AgentStatusMsg(t *testing.T) {
+	m := testModel()
+
+	statuses := map[string][]model.AgentInfo{
+		"repo1": {
+			{PaneID: "%0", State: model.AgentStateRunning, Elapsed: "2m"},
+		},
+	}
+
+	result, cmd := m.Update(AgentStatusMsg{Statuses: statuses})
+	updated := result.(Model)
+
+	if updated.agentStatus == nil {
+		t.Error("agentStatus should be set")
+	}
+	if cmd == nil {
+		t.Error("expected agentTickCmd to be returned")
+	}
+
+	// Verify agent status is merged into items
+	for _, item := range updated.items {
+		if item.Kind == model.ItemKindWorktree && filepath.Base(item.WorktreePath) == "repo1" {
+			if len(item.AgentStatus) != 1 {
+				t.Errorf("expected 1 agent for repo1, got %d", len(item.AgentStatus))
+			}
+		}
+	}
+}
+
+func TestUpdate_AgentStatusMsg_Empty(t *testing.T) {
+	m := testModel()
+
+	result, cmd := m.Update(AgentStatusMsg{Statuses: map[string][]model.AgentInfo{}})
+	updated := result.(Model)
+
+	if updated.agentStatus == nil {
+		t.Error("agentStatus should be non-nil (empty map)")
+	}
+	if cmd == nil {
+		t.Error("expected agentTickCmd to be returned")
+	}
+}
+
+func TestFetchAgentStatusCmd(t *testing.T) {
+	runner := &tmux.FakeRunner{
+		Outputs: map[string]string{
+			fmt.Sprintf("%v", []string{"has-session", "-t", "repo1"}):                                                                "",
+			fmt.Sprintf("%v", []string{"list-panes", "-s", "-t", "repo1", "-F", "#{pane_id}\t#{pane_title}\t#{pane_current_command}"}): "%0\t✳ claude\tnode\n",
+			fmt.Sprintf("%v", []string{"capture-pane", "-p", "-t", "%0"}):                                                            "  ❯ ",
+		},
+		Errors: map[string]error{
+			fmt.Sprintf("%v", []string{"has-session", "-t", "repo1-feat"}): fmt.Errorf("no session"),
+		},
+	}
+
+	groups := []model.RepoGroup{
+		{
+			Name:     "repo",
+			RootPath: "/code/repo",
+			Worktrees: []model.WorktreeInfo{
+				{Path: "/code/repo1", Branch: "main"},
+				{Path: "/code/repo1-feat", Branch: "feature"},
+			},
+		},
+	}
+
+	cmd := fetchAgentStatusCmd(runner, groups)
+	msg := cmd()
+
+	statusMsg, ok := msg.(AgentStatusMsg)
+	if !ok {
+		t.Fatalf("expected AgentStatusMsg, got %T", msg)
+	}
+	if len(statusMsg.Statuses["repo1"]) != 1 {
+		t.Errorf("expected 1 agent for repo1, got %d", len(statusMsg.Statuses["repo1"]))
+	}
+	if len(statusMsg.Statuses["repo1-feat"]) != 0 {
+		t.Errorf("expected 0 agents for repo1-feat, got %d", len(statusMsg.Statuses["repo1-feat"]))
 	}
 }
 

@@ -5,15 +5,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
+	"worktree-ui/internal/agent"
 	"worktree-ui/internal/config"
 	"worktree-ui/internal/git"
 	"worktree-ui/internal/model"
 	"worktree-ui/internal/sidebar"
+	"worktree-ui/internal/tmux"
 )
 
 // GitDataMsg is sent when git data has been fetched.
@@ -45,6 +48,14 @@ type RepoValidationErrMsg struct {
 	Err error
 }
 
+// AgentTickMsg triggers periodic agent status refresh.
+type AgentTickMsg time.Time
+
+// AgentStatusMsg delivers fetched agent status for all worktrees.
+type AgentStatusMsg struct {
+	Statuses map[string][]model.AgentInfo
+}
+
 // RepoAddedMsg is sent when a repository has been added to config.
 type RepoAddedMsg struct{}
 
@@ -52,6 +63,9 @@ type RepoAddedMsg struct{}
 type RepoAddErrMsg struct {
 	Err error
 }
+
+// agentPollInterval is how often we poll tmux for Claude Code agent status.
+const agentPollInterval = 2 * time.Second
 
 // Model is the BubbleTea model for the sidebar.
 type Model struct {
@@ -68,10 +82,13 @@ type Model struct {
 	addingRepo   bool
 	textInput    textinput.Model
 	configPath   string
+	tmuxRunner   tmux.Runner
+	agentStatus  map[string][]model.AgentInfo
 }
 
 // NewModel creates a new TUI model.
-func NewModel(cfg model.Config, runner git.CommandRunner, configPath string) Model {
+// tmuxRunner may be nil when running outside tmux (agent polling is skipped).
+func NewModel(cfg model.Config, runner git.CommandRunner, configPath string, tmuxRunner tmux.Runner) Model {
 	ti := textinput.New()
 	ti.Placeholder = "/path/to/repository"
 	ti.CharLimit = 256
@@ -84,6 +101,7 @@ func NewModel(cfg model.Config, runner git.CommandRunner, configPath string) Mod
 		loading:      true,
 		configPath:   configPath,
 		textInput:    ti,
+		tmuxRunner:   tmuxRunner,
 	}
 }
 
@@ -109,7 +127,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.items = sidebar.BuildItems(msg.Groups)
 		m.cursor = FirstSelectable(m.items)
 		m.loading = false
-		return m, nil
+		return m, agentTickCmd()
+
+	case AgentTickMsg:
+		if len(m.groups) > 0 && m.tmuxRunner != nil {
+			return m, fetchAgentStatusCmd(m.tmuxRunner, m.groups)
+		}
+		return m, agentTickCmd()
+
+	case AgentStatusMsg:
+		m.agentStatus = msg.Statuses
+		for i := range m.items {
+			if m.items[i].Kind == model.ItemKindWorktree {
+				sessionName := filepath.Base(m.items[i].WorktreePath)
+				m.items[i].AgentStatus = m.agentStatus[sessionName]
+			}
+		}
+		return m, agentTickCmd()
 
 	case GitDataErrMsg:
 		m.err = msg.Err
@@ -340,6 +374,31 @@ func addRepoToConfigCmd(configPath, name, repoPath string) tea.Cmd {
 			return RepoAddErrMsg{Err: err}
 		}
 		return RepoAddedMsg{}
+	}
+}
+
+func agentTickCmd() tea.Cmd {
+	return tea.Tick(agentPollInterval, func(t time.Time) tea.Msg {
+		return AgentTickMsg(t)
+	})
+}
+
+func fetchAgentStatusCmd(tmuxRunner tmux.Runner, groups []model.RepoGroup) tea.Cmd {
+	return func() tea.Msg {
+		statuses := make(map[string][]model.AgentInfo)
+		for _, group := range groups {
+			for _, wt := range group.Worktrees {
+				sessionName := filepath.Base(wt.Path)
+				agents, err := agent.DetectSessionAgents(tmuxRunner, sessionName)
+				if err != nil {
+					continue
+				}
+				if len(agents) > 0 {
+					statuses[sessionName] = agents
+				}
+			}
+		}
+		return AgentStatusMsg{Statuses: statuses}
 	}
 }
 
