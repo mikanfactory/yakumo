@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
+
 	"worktree-ui/internal/model"
 	"worktree-ui/internal/sidebar"
 )
@@ -208,6 +210,50 @@ func TestView_ShowsClickHelp(t *testing.T) {
 
 	if !strings.Contains(view, "click") {
 		t.Error("help text should mention 'click'")
+	}
+}
+
+func TestView_AddRepoMode(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+	m.textInput = textinput.New()
+	m.textInput.Focus()
+
+	view := m.View()
+
+	if !strings.Contains(view, "Add Repository") {
+		t.Errorf("add repo view should contain title, got:\n%s", view)
+	}
+	if !strings.Contains(view, "enter") {
+		t.Errorf("add repo view should contain help text, got:\n%s", view)
+	}
+	if !strings.Contains(view, "esc") {
+		t.Errorf("add repo view should contain cancel help, got:\n%s", view)
+	}
+}
+
+func TestView_AddRepoMode_WithError(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+	m.textInput = textinput.New()
+	m.err = fmt.Errorf("not a git repository")
+
+	view := m.View()
+
+	if !strings.Contains(view, "not a git repository") {
+		t.Errorf("add repo view should show error, got:\n%s", view)
+	}
+}
+
+func TestView_AddRepoMode_Loading(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+	m.loading = true
+
+	view := m.View()
+
+	if !strings.Contains(view, "Validating") {
+		t.Errorf("add repo loading view should show validating, got:\n%s", view)
 	}
 }
 

@@ -53,6 +53,10 @@ var (
 			Foreground(colorFgDim).
 			PaddingLeft(1).
 			PaddingTop(1)
+
+	errorStyle = lipgloss.NewStyle().
+			Foreground(colorRed).
+			PaddingLeft(1)
 )
 
 // FormatStatus formats a StatusInfo as a colored badge string.

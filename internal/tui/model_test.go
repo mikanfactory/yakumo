@@ -2,8 +2,11 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"worktree-ui/internal/git"
@@ -30,6 +33,7 @@ func testModel() Model {
 		groups:       groups,
 		cursor:       FirstSelectable(items),
 		sidebarWidth: 30,
+		textInput:    textinput.New(),
 	}
 }
 
@@ -88,7 +92,7 @@ func TestUpdate_Enter_SelectsWorktree(t *testing.T) {
 	}
 }
 
-func TestUpdate_Enter_NoopOnAction(t *testing.T) {
+func TestUpdate_Enter_AddRepo_EntersInputMode(t *testing.T) {
 	m := testModel()
 	// Navigate to "Add repository" action item
 	for i, item := range m.items {
@@ -98,14 +102,14 @@ func TestUpdate_Enter_NoopOnAction(t *testing.T) {
 		}
 	}
 
-	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := result.(Model)
 
-	if updated.selected != "" {
-		t.Errorf("selected should be empty for action items, got %q", updated.selected)
+	if !updated.addingRepo {
+		t.Error("addingRepo should be true after pressing enter on Add repository")
 	}
-	if cmd != nil {
-		t.Error("should not quit on action item")
+	if updated.selected != "" {
+		t.Errorf("selected should be empty, got %q", updated.selected)
 	}
 }
 
@@ -195,13 +199,16 @@ func TestNewModel(t *testing.T) {
 	}
 	runner := &fakeRunner{}
 
-	m := NewModel(cfg, runner)
+	m := NewModel(cfg, runner, "/tmp/config.yaml")
 
 	if m.sidebarWidth != 35 {
 		t.Errorf("sidebarWidth = %d, want 35", m.sidebarWidth)
 	}
 	if !m.loading {
 		t.Error("loading should be true initially")
+	}
+	if m.configPath != "/tmp/config.yaml" {
+		t.Errorf("configPath = %q, want %q", m.configPath, "/tmp/config.yaml")
 	}
 }
 
@@ -213,7 +220,7 @@ func TestInit_ReturnsCmd(t *testing.T) {
 		},
 	}
 	runner := &fakeRunner{}
-	m := NewModel(cfg, runner)
+	m := NewModel(cfg, runner, "")
 
 	cmd := m.Init()
 	if cmd == nil {
@@ -430,6 +437,374 @@ func TestFetchGitDataCmd_Error(t *testing.T) {
 	_, ok := msg.(GitDataErrMsg)
 	if !ok {
 		t.Fatalf("expected GitDataErrMsg, got %T", msg)
+	}
+}
+
+func TestUpdate_AddRepoMode_Escape_Cancels(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+	m.err = fmt.Errorf("previous error")
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated := result.(Model)
+
+	if updated.addingRepo {
+		t.Error("addingRepo should be false after escape")
+	}
+	if updated.err != nil {
+		t.Error("err should be cleared after escape")
+	}
+}
+
+func TestUpdate_AddRepoMode_Enter_EmptyPath(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := result.(Model)
+
+	if updated.err == nil {
+		t.Error("err should be set for empty path")
+	}
+	if cmd != nil {
+		t.Error("should not return a command for empty path")
+	}
+	if !updated.addingRepo {
+		t.Error("addingRepo should still be true")
+	}
+}
+
+func TestUpdate_AddRepoMode_Enter_ValidatesPath(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+	m.textInput.SetValue("/tmp/test-repo")
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := result.(Model)
+
+	if !updated.loading {
+		t.Error("loading should be true after confirming path")
+	}
+	if cmd == nil {
+		t.Error("expected validation command to be returned")
+	}
+}
+
+func TestUpdate_AddRepoMode_QuitKeysBlocked(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+
+	// 'q' should not quit in input mode
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	updated := result.(Model)
+
+	if updated.quitting {
+		t.Error("q should not quit in input mode")
+	}
+	if cmd != nil {
+		t.Error("should not return tea.Quit in input mode")
+	}
+}
+
+func TestUpdate_RepoValidatedMsg(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+	m.configPath = "/tmp/config.yaml"
+
+	result, cmd := m.Update(RepoValidatedMsg{Name: "my-repo", Path: "/tmp/my-repo"})
+	updated := result.(Model)
+
+	if !updated.loading {
+		t.Error("loading should be true while adding to config")
+	}
+	if cmd == nil {
+		t.Error("expected addRepoToConfigCmd to be returned")
+	}
+}
+
+func TestUpdate_RepoValidationErrMsg(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+	m.loading = true
+
+	result, _ := m.Update(RepoValidationErrMsg{Err: fmt.Errorf("not a git repo")})
+	updated := result.(Model)
+
+	if updated.loading {
+		t.Error("loading should be false after validation error")
+	}
+	if updated.err == nil {
+		t.Error("err should be set")
+	}
+	if !updated.addingRepo {
+		t.Error("addingRepo should still be true to allow correction")
+	}
+}
+
+func TestUpdate_RepoAddedMsg(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	content := "sidebar_width: 30\nrepositories:\n  - name: repo1\n    path: /tmp/repo1\n"
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := testModel()
+	m.addingRepo = true
+	m.configPath = cfgPath
+	m.runner = &fakeRunner{}
+
+	result, cmd := m.Update(RepoAddedMsg{})
+	updated := result.(Model)
+
+	if updated.addingRepo {
+		t.Error("addingRepo should be false after successful add")
+	}
+	if cmd == nil {
+		t.Error("expected fetchGitData command to refresh the list")
+	}
+}
+
+func TestUpdate_RepoAddErrMsg(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+	m.loading = true
+
+	result, _ := m.Update(RepoAddErrMsg{Err: fmt.Errorf("write failed")})
+	updated := result.(Model)
+
+	if updated.loading {
+		t.Error("loading should be false after add error")
+	}
+	if updated.err == nil {
+		t.Error("err should be set")
+	}
+	if updated.addingRepo {
+		t.Error("addingRepo should be false after add error")
+	}
+}
+
+func TestValidateRepoCmd_NotGitRepo(t *testing.T) {
+	runner := git.FakeCommandRunner{
+		Errors: map[string]error{},
+	}
+
+	tmpDir := t.TempDir()
+	// FakeCommandRunner won't have the key for rev-parse, so it will error
+	cmd := validateRepoCmd(runner, tmpDir)
+	msg := cmd()
+
+	_, ok := msg.(RepoValidationErrMsg)
+	if !ok {
+		t.Fatalf("expected RepoValidationErrMsg, got %T", msg)
+	}
+}
+
+func TestValidateRepoCmd_NonexistentPath(t *testing.T) {
+	runner := git.FakeCommandRunner{}
+
+	cmd := validateRepoCmd(runner, "/nonexistent/path")
+	msg := cmd()
+
+	errMsg, ok := msg.(RepoValidationErrMsg)
+	if !ok {
+		t.Fatalf("expected RepoValidationErrMsg, got %T", msg)
+	}
+	if errMsg.Err == nil {
+		t.Error("expected error to be set")
+	}
+}
+
+func TestAddRepoToConfigCmd_Success(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	content := "sidebar_width: 30\nrepositories:\n  - name: repo1\n    path: /tmp/repo1\n"
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := addRepoToConfigCmd(cfgPath, "new-repo", "/tmp/new-repo")
+	msg := cmd()
+
+	if _, ok := msg.(RepoAddedMsg); !ok {
+		t.Fatalf("expected RepoAddedMsg, got %T", msg)
+	}
+}
+
+func TestUpdate_RepoValidatedMsg_NormalMode(t *testing.T) {
+	m := testModel()
+	m.configPath = "/tmp/config.yaml"
+
+	result, cmd := m.Update(RepoValidatedMsg{Name: "repo", Path: "/tmp/repo"})
+	updated := result.(Model)
+
+	if !updated.loading {
+		t.Error("loading should be true")
+	}
+	if cmd == nil {
+		t.Error("expected command")
+	}
+}
+
+func TestUpdate_RepoAddedMsg_NormalMode(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	content := "sidebar_width: 30\nrepositories:\n  - name: repo1\n    path: /tmp/repo1\n"
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := testModel()
+	m.configPath = cfgPath
+	m.runner = &fakeRunner{}
+
+	result, cmd := m.Update(RepoAddedMsg{})
+	updated := result.(Model)
+
+	if updated.addingRepo {
+		t.Error("addingRepo should be false")
+	}
+	if cmd == nil {
+		t.Error("expected fetchGitData command")
+	}
+}
+
+func TestUpdate_RepoAddErrMsg_NormalMode(t *testing.T) {
+	m := testModel()
+	m.loading = true
+
+	result, _ := m.Update(RepoAddErrMsg{Err: fmt.Errorf("fail")})
+	updated := result.(Model)
+
+	if updated.loading {
+		t.Error("loading should be false")
+	}
+	if updated.err == nil {
+		t.Error("err should be set")
+	}
+}
+
+func TestUpdate_RepoValidationErrMsg_NormalMode(t *testing.T) {
+	m := testModel()
+	m.loading = true
+
+	result, _ := m.Update(RepoValidationErrMsg{Err: fmt.Errorf("fail")})
+	updated := result.(Model)
+
+	if updated.loading {
+		t.Error("loading should be false")
+	}
+	if updated.err == nil {
+		t.Error("err should be set")
+	}
+}
+
+func TestUpdate_AddRepoMode_CtrlC_Quits(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := result.(Model)
+
+	if !updated.quitting {
+		t.Error("ctrl+c should quit even in input mode")
+	}
+	if cmd == nil {
+		t.Error("expected tea.Quit cmd")
+	}
+}
+
+func TestValidateRepoCmd_TildeExpansion(t *testing.T) {
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{},
+	}
+
+	// ~/nonexistent will expand but the path won't exist on disk
+	cmd := validateRepoCmd(runner, "~/nonexistent-shiki-test-path")
+	msg := cmd()
+
+	_, ok := msg.(RepoValidationErrMsg)
+	if !ok {
+		t.Fatalf("expected RepoValidationErrMsg, got %T", msg)
+	}
+}
+
+func TestValidateRepoCmd_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			fmt.Sprintf("%s:[rev-parse --show-toplevel]", tmpDir): tmpDir + "\n",
+		},
+	}
+
+	cmd := validateRepoCmd(runner, tmpDir)
+	msg := cmd()
+
+	validMsg, ok := msg.(RepoValidatedMsg)
+	if !ok {
+		t.Fatalf("expected RepoValidatedMsg, got %T (%v)", msg, msg)
+	}
+	if validMsg.Path != tmpDir {
+		t.Errorf("Path = %q, want %q", validMsg.Path, tmpDir)
+	}
+	if validMsg.Name != filepath.Base(tmpDir) {
+		t.Errorf("Name = %q, want %q", validMsg.Name, filepath.Base(tmpDir))
+	}
+}
+
+func TestUpdate_AddRepoMode_RepoAddedMsg(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	content := "sidebar_width: 30\nrepositories:\n  - name: repo1\n    path: /tmp/repo1\n"
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := testModel()
+	m.addingRepo = true
+	m.configPath = cfgPath
+	m.runner = &fakeRunner{}
+	m.textInput.SetValue("/some/path")
+
+	result, cmd := m.Update(RepoAddedMsg{})
+	updated := result.(Model)
+
+	if updated.addingRepo {
+		t.Error("addingRepo should be false")
+	}
+	if updated.textInput.Value() != "" {
+		t.Error("textInput should be cleared")
+	}
+	if cmd == nil {
+		t.Error("expected fetchGitData command")
+	}
+}
+
+func TestUpdate_AddRepoMode_RepoAddErrMsg(t *testing.T) {
+	m := testModel()
+	m.addingRepo = true
+	m.loading = true
+
+	result, _ := m.Update(RepoAddErrMsg{Err: fmt.Errorf("config write failed")})
+	updated := result.(Model)
+
+	if updated.loading {
+		t.Error("loading should be false")
+	}
+	if updated.err == nil {
+		t.Error("err should be set")
+	}
+	if updated.addingRepo {
+		t.Error("addingRepo should be false after add error")
+	}
+}
+
+func TestAddRepoToConfigCmd_Error(t *testing.T) {
+	cmd := addRepoToConfigCmd("/nonexistent/config.yaml", "repo", "/tmp/repo")
+	msg := cmd()
+
+	if _, ok := msg.(RepoAddErrMsg); !ok {
+		t.Fatalf("expected RepoAddErrMsg, got %T", msg)
 	}
 }
 

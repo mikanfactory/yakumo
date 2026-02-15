@@ -26,8 +26,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	resolvedConfigPath, err := config.ResolveConfigPath(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
 	runner := git.OSCommandRunner{}
-	m := tui.NewModel(cfg, runner)
+	m := tui.NewModel(cfg, runner, resolvedConfigPath)
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	result, err := p.Run()

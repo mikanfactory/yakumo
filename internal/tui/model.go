@@ -2,11 +2,15 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
+	"worktree-ui/internal/config"
 	"worktree-ui/internal/git"
 	"worktree-ui/internal/model"
 	"worktree-ui/internal/sidebar"
@@ -30,6 +34,25 @@ type WorktreeAddErrMsg struct {
 	Err error
 }
 
+// RepoValidatedMsg is sent when a repository path has been validated.
+type RepoValidatedMsg struct {
+	Name string
+	Path string
+}
+
+// RepoValidationErrMsg is sent when repository validation fails.
+type RepoValidationErrMsg struct {
+	Err error
+}
+
+// RepoAddedMsg is sent when a repository has been added to config.
+type RepoAddedMsg struct{}
+
+// RepoAddErrMsg is sent when adding a repository to config fails.
+type RepoAddErrMsg struct {
+	Err error
+}
+
 // Model is the BubbleTea model for the sidebar.
 type Model struct {
 	items        []model.NavigableItem
@@ -42,15 +65,25 @@ type Model struct {
 	config       model.Config
 	runner       git.CommandRunner
 	loading      bool
+	addingRepo   bool
+	textInput    textinput.Model
+	configPath   string
 }
 
 // NewModel creates a new TUI model.
-func NewModel(cfg model.Config, runner git.CommandRunner) Model {
+func NewModel(cfg model.Config, runner git.CommandRunner, configPath string) Model {
+	ti := textinput.New()
+	ti.Placeholder = "/path/to/repository"
+	ti.CharLimit = 256
+	ti.Width = 50
+
 	return Model{
 		sidebarWidth: cfg.SidebarWidth,
 		config:       cfg,
 		runner:       runner,
 		loading:      true,
+		configPath:   configPath,
+		textInput:    ti,
 	}
 }
 
@@ -64,6 +97,11 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle add-repo input mode
+	if m.addingRepo {
+		return m.updateAddRepoMode(msg)
+	}
+
 	switch msg := msg.(type) {
 
 	case GitDataMsg:
@@ -87,6 +125,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		return m, nil
 
+	case RepoValidatedMsg:
+		m.loading = true
+		return m, addRepoToConfigCmd(m.configPath, msg.Name, msg.Path)
+
+	case RepoValidationErrMsg:
+		m.err = msg.Err
+		m.loading = false
+		return m, nil
+
+	case RepoAddedMsg:
+		cfg, err := config.LoadFromFile(m.configPath)
+		if err != nil {
+			m.err = err
+			m.loading = false
+			m.addingRepo = false
+			return m, nil
+		}
+		m.config = cfg
+		m.addingRepo = false
+		m.textInput.SetValue("")
+		m.loading = true
+		return m, fetchGitDataCmd(m.config, m.runner)
+
+	case RepoAddErrMsg:
+		m.err = msg.Err
+		m.loading = false
+		m.addingRepo = false
+		return m, nil
+
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionRelease && msg.Button == tea.MouseButtonLeft {
 			for i, item := range m.items {
@@ -102,6 +169,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if item.Kind == model.ItemKindAddWorktree {
 						m.loading = true
 						return m, addWorktreeCmd(m.runner, item.RepoRootPath, m.config.WorktreeBasePath)
+					}
+					if item.Kind == model.ItemKindAddRepo {
+						m.addingRepo = true
+						m.err = nil
+						cmd := m.textInput.Focus()
+						return m, cmd
 					}
 					return m, nil
 				}
@@ -132,11 +205,76 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.loading = true
 					return m, addWorktreeCmd(m.runner, item.RepoRootPath, m.config.WorktreeBasePath)
 				}
+				if item.Kind == model.ItemKindAddRepo {
+					m.addingRepo = true
+					m.err = nil
+					cmd := m.textInput.Focus()
+					return m, cmd
+				}
 			}
 		}
 	}
 
 	return m, nil
+}
+
+func (m Model) updateAddRepoMode(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEscape:
+			m.addingRepo = false
+			m.textInput.SetValue("")
+			m.err = nil
+			return m, nil
+		case tea.KeyEnter:
+			path := strings.TrimSpace(m.textInput.Value())
+			if path == "" {
+				m.err = fmt.Errorf("path cannot be empty")
+				return m, nil
+			}
+			m.loading = true
+			m.err = nil
+			return m, validateRepoCmd(m.runner, path)
+		case tea.KeyCtrlC:
+			m.quitting = true
+			return m, tea.Quit
+		}
+
+	case RepoValidatedMsg:
+		m.loading = true
+		return m, addRepoToConfigCmd(m.configPath, msg.Name, msg.Path)
+
+	case RepoValidationErrMsg:
+		m.err = msg.Err
+		m.loading = false
+		return m, nil
+
+	case RepoAddedMsg:
+		cfg, err := config.LoadFromFile(m.configPath)
+		if err != nil {
+			m.err = err
+			m.loading = false
+			m.addingRepo = false
+			return m, nil
+		}
+		m.config = cfg
+		m.addingRepo = false
+		m.textInput.SetValue("")
+		m.loading = true
+		return m, fetchGitDataCmd(m.config, m.runner)
+
+	case RepoAddErrMsg:
+		m.err = msg.Err
+		m.loading = false
+		m.addingRepo = false
+		return m, nil
+	}
+
+	// Delegate to textinput
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
 }
 
 // ZoneID returns the bubblezone ID for an item at the given index.
@@ -161,6 +299,47 @@ func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath string) tea.Cmd
 		}
 
 		return WorktreeAddedMsg{}
+	}
+}
+
+func validateRepoCmd(runner git.CommandRunner, inputPath string) tea.Cmd {
+	return func() tea.Msg {
+		p := inputPath
+		// Expand ~ to home directory
+		if strings.HasPrefix(p, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return RepoValidationErrMsg{Err: fmt.Errorf("expanding home directory: %w", err)}
+			}
+			p = filepath.Join(home, p[2:])
+		}
+
+		expanded, err := filepath.Abs(p)
+		if err != nil {
+			return RepoValidationErrMsg{Err: fmt.Errorf("invalid path: %w", err)}
+		}
+
+		if _, err := os.Stat(expanded); err != nil {
+			return RepoValidationErrMsg{Err: fmt.Errorf("path does not exist: %s", expanded)}
+		}
+
+		root, err := runner.Run(expanded, "rev-parse", "--show-toplevel")
+		if err != nil {
+			return RepoValidationErrMsg{Err: fmt.Errorf("not a git repository: %s", expanded)}
+		}
+
+		root = strings.TrimSpace(root)
+		name := filepath.Base(root)
+		return RepoValidatedMsg{Name: name, Path: root}
+	}
+}
+
+func addRepoToConfigCmd(configPath, name, repoPath string) tea.Cmd {
+	return func() tea.Msg {
+		if err := config.AppendRepository(configPath, name, repoPath); err != nil {
+			return RepoAddErrMsg{Err: err}
+		}
+		return RepoAddedMsg{}
 	}
 }
 
