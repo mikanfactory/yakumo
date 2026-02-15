@@ -68,24 +68,30 @@ func renderItem(item model.NavigableItem, selected bool, width int) string {
 }
 
 func renderWorktree(item model.NavigableItem, selected bool, width int) string {
+	agentIcon := AgentIcon(item.AgentStatus)
 	statusBadge := FormatStatus(item.Status)
 	branchName := item.Label
 
+	// Use inline styles to avoid PaddingLeft double-application when
+	// inserting agent icon between indent and branch name.
+	selectedBranchStyle := lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	normalBranchStyle := lipgloss.NewStyle().Foreground(colorFg)
+
 	var leftPart string
 	if selected {
-		cursor := "> "
-		maxBranchLen := width - lipgloss.Width(cursor) - lipgloss.Width(statusBadge) - 1
+		prefix := " > " + agentIcon
+		maxBranchLen := width - lipgloss.Width(prefix) - lipgloss.Width(statusBadge) - 1
 		if maxBranchLen > 0 && lipgloss.Width(branchName) > maxBranchLen {
 			branchName = truncate(branchName, maxBranchLen)
 		}
-		leftPart = worktreeSelectedStyle.Render(cursor + branchName)
+		leftPart = selectedBranchStyle.Render(" > ") + agentIcon + selectedBranchStyle.Render(branchName)
 	} else {
-		indent := "   "
-		maxBranchLen := width - lipgloss.Width(indent) - lipgloss.Width(statusBadge) - 1
+		prefix := "   " + agentIcon
+		maxBranchLen := width - lipgloss.Width(prefix) - lipgloss.Width(statusBadge) - 1
 		if maxBranchLen > 0 && lipgloss.Width(branchName) > maxBranchLen {
 			branchName = truncate(branchName, maxBranchLen)
 		}
-		leftPart = worktreeStyle.Render(branchName)
+		leftPart = "   " + agentIcon + normalBranchStyle.Render(branchName)
 	}
 
 	if statusBadge == "" {

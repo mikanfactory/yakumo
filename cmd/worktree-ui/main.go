@@ -33,7 +33,13 @@ func main() {
 	}
 
 	runner := git.OSCommandRunner{}
-	m := tui.NewModel(cfg, runner, resolvedConfigPath)
+
+	var tmuxRunner tmux.Runner
+	if tmux.IsInsideTmux() {
+		tmuxRunner = tmux.OSRunner{}
+	}
+
+	m := tui.NewModel(cfg, runner, resolvedConfigPath, tmuxRunner)
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	result, err := p.Run()

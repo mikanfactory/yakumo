@@ -9,6 +9,9 @@ import (
 	"worktree-ui/internal/model"
 )
 
+// Agent status icon (U+25CF Black Circle, colored per state)
+const iconAgent = "●"
+
 var (
 	colorFg         = lipgloss.Color("#cdd6f4")
 	colorFgDim      = lipgloss.Color("#6c7086")
@@ -57,6 +60,11 @@ var (
 	errorStyle = lipgloss.NewStyle().
 			Foreground(colorRed).
 			PaddingLeft(1)
+
+	// Agent status colors (Catppuccin-compatible)
+	colorAgentIdle    = colorGreen      // #a6e3a1
+	colorAgentRunning = colorYellow     // #f9e2af
+	colorAgentWaiting = colorActionItem // #89dceb (cyan)
 )
 
 // FormatStatus formats a StatusInfo as colored line change counts (e.g. "+888 -89").
@@ -76,4 +84,35 @@ func FormatStatus(s model.StatusInfo) string {
 		parts = append(parts, delStyle.Render(fmt.Sprintf("-%d", s.Deletions)))
 	}
 	return strings.Join(parts, " ")
+}
+
+// AgentIcon returns a colored ● icon representing the highest-priority
+// agent state. Returns empty string when no agents are present.
+func AgentIcon(agents []model.AgentInfo) string {
+	if len(agents) == 0 {
+		return ""
+	}
+
+	highestState := model.AgentStateIdle
+	for _, a := range agents {
+		if a.State > highestState {
+			highestState = a.State
+		}
+	}
+
+	var color lipgloss.Color
+	var icon string
+	switch highestState {
+	case model.AgentStateRunning:
+		color = colorAgentRunning
+		icon = iconAgent
+	case model.AgentStateWaiting:
+		color = colorAgentWaiting
+		icon = iconAgent
+	default:
+		color = colorAgentIdle
+		icon = iconAgent
+	}
+
+	return lipgloss.NewStyle().Foreground(color).Render(icon) + " "
 }
