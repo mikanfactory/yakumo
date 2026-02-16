@@ -10,6 +10,7 @@ import (
 
 	"worktree-ui/internal/config"
 	"worktree-ui/internal/git"
+	"worktree-ui/internal/model"
 	"worktree-ui/internal/tmux"
 	"worktree-ui/internal/tui"
 )
@@ -57,12 +58,32 @@ func main() {
 
 	if tmux.IsInsideTmux() {
 		tmuxRunner := tmux.OSRunner{}
-		if _, err := tmux.SelectWorktreeSession(tmuxRunner, selected); err != nil {
+		layout, err := tmux.SelectWorktreeSession(tmuxRunner, selected)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "tmux error: %v\n", err)
 			os.Exit(1)
+		}
+
+		// Run startup command only for newly created sessions
+		if layout.BottomRight1.PaneID != "" {
+			repo := findRepoByPath(cfg, finalModel.SelectedRepoPath())
+			if repo.StartupCommand != "" {
+				if err := tmux.SendKeys(tmuxRunner, layout.BottomRight1.PaneID, repo.StartupCommand); err != nil {
+					fmt.Fprintf(os.Stderr, "startup command error: %v\n", err)
+				}
+			}
 		}
 		return
 	}
 
 	fmt.Print(selected)
+}
+
+func findRepoByPath(cfg model.Config, repoPath string) model.RepositoryDef {
+	for _, repo := range cfg.Repositories {
+		if repo.Path == repoPath {
+			return repo
+		}
+	}
+	return model.RepositoryDef{}
 }
