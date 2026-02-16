@@ -25,6 +25,7 @@ type WorktreeInfo struct {
 	Path   string
 	Branch string
 	Status StatusInfo
+	IsBare bool
 }
 
 // StatusInfo holds the aggregated line change counts for a worktree.
@@ -70,4 +71,5 @@ type NavigableItem struct {
 	RepoRootPath string
 	Status       StatusInfo
 	AgentStatus  []AgentInfo
+	IsBare       bool
 }

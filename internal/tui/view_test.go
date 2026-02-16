@@ -453,3 +453,62 @@ func TestRenderWorktree_Selected_WithStatus(t *testing.T) {
 		t.Error("should contain insertions")
 	}
 }
+
+func TestView_ShowsArchiveHint(t *testing.T) {
+	m := testModel()
+	view := m.View()
+
+	if !strings.Contains(view, "d: archive") {
+		t.Errorf("help text should mention 'd: archive', got:\n%s", view)
+	}
+}
+
+func TestView_ConfirmArchiveMode(t *testing.T) {
+	m := testModel()
+	m.confirmingArchive = true
+	m.archiveTarget = m.cursor
+
+	view := m.View()
+
+	if !strings.Contains(view, "Archive Worktree") {
+		t.Errorf("confirm view should contain title, got:\n%s", view)
+	}
+	if !strings.Contains(view, m.items[m.archiveTarget].Label) {
+		t.Errorf("confirm view should contain branch name, got:\n%s", view)
+	}
+	if !strings.Contains(view, "enter") {
+		t.Errorf("confirm view should contain confirm help, got:\n%s", view)
+	}
+	if !strings.Contains(view, "esc") {
+		t.Errorf("confirm view should contain cancel help, got:\n%s", view)
+	}
+	if !strings.Contains(view, "The branch will be preserved") {
+		t.Errorf("confirm view should explain branch preservation, got:\n%s", view)
+	}
+}
+
+func TestView_ConfirmArchiveMode_WithError(t *testing.T) {
+	m := testModel()
+	m.confirmingArchive = true
+	m.archiveTarget = m.cursor
+	m.err = fmt.Errorf("worktree has uncommitted changes")
+
+	view := m.View()
+
+	if !strings.Contains(view, "worktree has uncommitted changes") {
+		t.Errorf("confirm view should show error, got:\n%s", view)
+	}
+}
+
+func TestView_ConfirmArchiveMode_Loading(t *testing.T) {
+	m := testModel()
+	m.confirmingArchive = true
+	m.archiveTarget = m.cursor
+	m.loading = true
+
+	view := m.View()
+
+	if !strings.Contains(view, "Removing worktree") {
+		t.Errorf("confirm loading view should show removing message, got:\n%s", view)
+	}
+}

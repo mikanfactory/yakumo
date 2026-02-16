@@ -920,6 +920,217 @@ func TestFetchAgentStatusCmd(t *testing.T) {
 	}
 }
 
+func testModelWithBare() Model {
+	groups := []model.RepoGroup{
+		{
+			Name:     "repo1",
+			RootPath: "/code/repo1",
+			Worktrees: []model.WorktreeInfo{
+				{Path: "/code/repo1", Branch: "main", IsBare: true},
+				{Path: "/code/repo1-feat", Branch: "feature-x"},
+			},
+		},
+	}
+
+	items := sidebar.BuildItems(groups)
+
+	return Model{
+		items:        items,
+		groups:       groups,
+		cursor:       FirstSelectable(items),
+		sidebarWidth: 30,
+		textInput:    textinput.New(),
+	}
+}
+
+func TestUpdate_D_OnWorktree_EntersConfirmMode(t *testing.T) {
+	m := testModel()
+	// Cursor should be on first worktree (non-bare)
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	updated := result.(Model)
+
+	if !updated.confirmingArchive {
+		t.Error("confirmingArchive should be true")
+	}
+	if updated.archiveTarget != m.cursor {
+		t.Errorf("archiveTarget = %d, want %d", updated.archiveTarget, m.cursor)
+	}
+	if cmd != nil {
+		t.Error("should not return a command")
+	}
+}
+
+func TestUpdate_D_OnBareWorktree_NoOp(t *testing.T) {
+	m := testModelWithBare()
+	// First selectable item is the bare worktree
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	updated := result.(Model)
+
+	if updated.confirmingArchive {
+		t.Error("confirmingArchive should be false for bare worktree")
+	}
+}
+
+func TestUpdate_D_OnNonWorktree_NoOp(t *testing.T) {
+	m := testModel()
+	// Navigate to "Add worktree" item
+	for i, item := range m.items {
+		if item.Kind == model.ItemKindAddWorktree {
+			m.cursor = i
+			break
+		}
+	}
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	updated := result.(Model)
+
+	if updated.confirmingArchive {
+		t.Error("confirmingArchive should be false for non-worktree item")
+	}
+}
+
+func TestUpdate_ConfirmArchiveMode_Escape_Cancels(t *testing.T) {
+	m := testModel()
+	m.confirmingArchive = true
+	m.archiveTarget = m.cursor
+	m.err = fmt.Errorf("previous error")
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated := result.(Model)
+
+	if updated.confirmingArchive {
+		t.Error("confirmingArchive should be false after escape")
+	}
+	if updated.err != nil {
+		t.Error("err should be cleared after escape")
+	}
+}
+
+func TestUpdate_ConfirmArchiveMode_Enter_Confirms(t *testing.T) {
+	m := testModel()
+	m.confirmingArchive = true
+	m.archiveTarget = m.cursor
+	m.runner = &fakeRunner{}
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := result.(Model)
+
+	if !updated.loading {
+		t.Error("loading should be true after confirming archive")
+	}
+	if cmd == nil {
+		t.Error("expected archiveWorktreeCmd to be returned")
+	}
+}
+
+func TestUpdate_ConfirmArchiveMode_CtrlC_Quits(t *testing.T) {
+	m := testModel()
+	m.confirmingArchive = true
+	m.archiveTarget = m.cursor
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := result.(Model)
+
+	if !updated.quitting {
+		t.Error("ctrl+c should quit even in confirm mode")
+	}
+	if cmd == nil {
+		t.Error("expected tea.Quit cmd")
+	}
+}
+
+func TestUpdate_ConfirmArchiveMode_QBlocked(t *testing.T) {
+	m := testModel()
+	m.confirmingArchive = true
+	m.archiveTarget = m.cursor
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	updated := result.(Model)
+
+	if updated.quitting {
+		t.Error("q should not quit in confirm mode")
+	}
+	if cmd != nil {
+		t.Error("should not return tea.Quit in confirm mode")
+	}
+}
+
+func TestUpdate_WorktreeArchivedMsg(t *testing.T) {
+	m := testModel()
+	m.confirmingArchive = true
+	m.archiveTarget = m.cursor
+	m.runner = &fakeRunner{}
+	m.config = model.Config{
+		Repositories: []model.RepositoryDef{{Name: "test", Path: "/test"}},
+	}
+
+	result, cmd := m.Update(WorktreeArchivedMsg{})
+	updated := result.(Model)
+
+	if !updated.loading {
+		t.Error("loading should be true after WorktreeArchivedMsg (refreshing)")
+	}
+	if updated.confirmingArchive {
+		t.Error("confirmingArchive should be false after success")
+	}
+	if cmd == nil {
+		t.Error("expected fetchGitDataCmd to be returned")
+	}
+}
+
+func TestUpdate_WorktreeArchiveErrMsg(t *testing.T) {
+	m := testModel()
+	m.confirmingArchive = true
+	m.archiveTarget = m.cursor
+
+	result, _ := m.Update(WorktreeArchiveErrMsg{Err: fmt.Errorf("remove failed")})
+	updated := result.(Model)
+
+	if updated.loading {
+		t.Error("loading should be false after archive error")
+	}
+	if updated.err == nil {
+		t.Error("err should be set")
+	}
+	if updated.confirmingArchive {
+		t.Error("confirmingArchive should be false after error")
+	}
+}
+
+func TestArchiveWorktreeCmd_Success(t *testing.T) {
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			"/repo:[worktree remove /tmp/old-worktree]": "",
+		},
+	}
+
+	cmd := archiveWorktreeCmd(runner, "/repo", "/tmp/old-worktree")
+	msg := cmd()
+
+	if _, ok := msg.(WorktreeArchivedMsg); !ok {
+		t.Fatalf("expected WorktreeArchivedMsg, got %T", msg)
+	}
+}
+
+func TestArchiveWorktreeCmd_Error(t *testing.T) {
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{},
+	}
+
+	cmd := archiveWorktreeCmd(runner, "/repo", "/tmp/old-worktree")
+	msg := cmd()
+
+	errMsg, ok := msg.(WorktreeArchiveErrMsg)
+	if !ok {
+		t.Fatalf("expected WorktreeArchiveErrMsg, got %T", msg)
+	}
+	if errMsg.Err == nil {
+		t.Error("expected error to be set")
+	}
+}
+
 type fakeRunner struct{}
 
 func (f *fakeRunner) Run(dir string, args ...string) (string, error) {

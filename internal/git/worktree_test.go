@@ -139,6 +139,22 @@ func TestToWorktreeInfo(t *testing.T) {
 	}
 }
 
+func TestToWorktreeInfo_IsBare(t *testing.T) {
+	entries := []worktreeEntry{
+		{Path: "/repo", Branch: "main", IsBare: true},
+		{Path: "/repo-feat", Branch: "feat", IsBare: false},
+	}
+
+	infos := ToWorktreeInfo(entries)
+
+	if !infos[0].IsBare {
+		t.Error("infos[0].IsBare should be true")
+	}
+	if infos[1].IsBare {
+		t.Error("infos[1].IsBare should be false")
+	}
+}
+
 func TestAddWorktree(t *testing.T) {
 	runner := FakeCommandRunner{
 		Outputs: map[string]string{
@@ -158,6 +174,30 @@ func TestAddWorktree_Error(t *testing.T) {
 	}
 
 	err := AddWorktree(runner, "/repo", "/tmp/new-worktree", "user/feature")
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+}
+
+func TestRemoveWorktree(t *testing.T) {
+	runner := FakeCommandRunner{
+		Outputs: map[string]string{
+			"/repo:[worktree remove /tmp/old-worktree]": "",
+		},
+	}
+
+	err := RemoveWorktree(runner, "/repo", "/tmp/old-worktree")
+	if err != nil {
+		t.Fatalf("RemoveWorktree failed: %v", err)
+	}
+}
+
+func TestRemoveWorktree_Error(t *testing.T) {
+	runner := FakeCommandRunner{
+		Outputs: map[string]string{},
+	}
+
+	err := RemoveWorktree(runner, "/repo", "/tmp/old-worktree")
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
