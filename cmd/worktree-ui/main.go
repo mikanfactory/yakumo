@@ -4,10 +4,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
+	"worktree-ui/internal/branchname"
+	"worktree-ui/internal/claude"
 	"worktree-ui/internal/config"
 	"worktree-ui/internal/git"
 	"worktree-ui/internal/tmux"
@@ -39,7 +43,21 @@ func main() {
 		tmuxRunner = tmux.OSRunner{}
 	}
 
-	m := tui.NewModel(cfg, runner, resolvedConfigPath, tmuxRunner)
+	var claudeReader claude.Reader
+	var branchNameGen branchname.Generator
+
+	if claudePath, err := exec.LookPath("claude"); err == nil {
+		if home, err := os.UserHomeDir(); err == nil {
+			claudeReader = claude.OSReader{
+				HistoryPath: filepath.Join(home, ".claude", "history.jsonl"),
+			}
+			branchNameGen = branchname.CLIGenerator{
+				ClaudePath: claudePath,
+			}
+		}
+	}
+
+	m := tui.NewModel(cfg, runner, resolvedConfigPath, tmuxRunner, claudeReader, branchNameGen)
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	result, err := p.Run()
