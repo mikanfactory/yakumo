@@ -61,6 +61,28 @@ const (
 	ItemKindSettings
 )
 
+// RenameStatus tracks the branch rename lifecycle.
+type RenameStatus int
+
+const (
+	RenameStatusPending   RenameStatus = iota // Waiting for first prompt
+	RenameStatusDetected                      // Prompt found, LLM call in flight
+	RenameStatusCompleted                     // Branch has been renamed
+	RenameStatusFailed                        // LLM or rename failed, keeping country name
+	RenameStatusSkipped                       // No prompt detected within timeout
+)
+
+// BranchRenameInfo tracks the state of an LLM-based branch rename for one worktree.
+type BranchRenameInfo struct {
+	Status         RenameStatus
+	OriginalBranch string
+	NewBranch      string
+	WorktreePath   string
+	CreatedAt      int64  // Unix milliseconds when worktree was created
+	SessionID      string // Claude session ID once detected
+	FirstPrompt    string // The user's first prompt text
+}
+
 // NavigableItem is a flattened item in the sidebar list used for navigation.
 type NavigableItem struct {
 	Kind         ItemKind
