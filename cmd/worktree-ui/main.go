@@ -96,6 +96,8 @@ func main() {
 				if err := tmux.SendKeys(tmuxRunner, layout.TopRight1.PaneID, diffUIPath); err != nil {
 					fmt.Fprintf(os.Stderr, "diff-ui launch error: %v\n", err)
 				}
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: diff-ui not found (searched executable directory and PATH)\n")
 			}
 		}
 		return
