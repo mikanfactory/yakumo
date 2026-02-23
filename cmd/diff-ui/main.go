@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -59,6 +60,10 @@ type ChecksDataMsg struct {
 }
 
 type ChecksDataErrMsg struct {
+	Err error
+}
+
+type VimFinishedMsg struct {
 	Err error
 }
 
@@ -531,6 +536,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.checks.err = msg.Err
 		return m, nil
 
+	case VimFinishedMsg:
+		return m, tea.Batch(
+			fetchChangesCmd(m.gitRunner, m.repoDir),
+			fetchChecksCmd(m.ghRunner, m.gitRunner, m.repoDir),
+		)
+
 	case TickMsg:
 		return m, tea.Batch(
 			fetchChangesCmd(m.gitRunner, m.repoDir),
@@ -566,6 +577,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = TabChecks
 			return m, nil
 
+		case "enter":
+			if m.activeTab == TabChanges && len(m.changes.files) > 0 {
+				file := m.changes.files[m.changes.cursor]
+				fullPath := filepath.Join(m.repoDir, file.Path)
+				c := exec.Command("vim", fullPath)
+				return m, tea.ExecProcess(c, func(err error) tea.Msg {
+					return VimFinishedMsg{Err: err}
+				})
+			}
+			return m, nil
+
 		default:
 			switch m.activeTab {
 			case TabChanges:
@@ -596,7 +618,7 @@ func (m Model) View() string {
 		content = m.checks.view(m.width, viewportHeight)
 	}
 
-	help := helpStyle.Render("  tab: switch pane  j/k: navigate  enter: toggle  q: quit")
+	help := helpStyle.Render("  tab: switch pane  j/k: navigate  enter: open in vim  q: quit")
 
 	return lipgloss.JoinVertical(lipgloss.Left, tabBar, content, help)
 }
