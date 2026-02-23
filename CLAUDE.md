@@ -9,11 +9,14 @@ Git worktreeを管理するためのターミナルUIアプリケーション。
 ## Commands
 
 ```bash
-# 実行
-go run ./cmd/worktree-ui
+# 実行（worktree UI）
+go run ./cmd/shiki
+
+# 実行（diff UI）
+go run ./cmd/shiki -- --diff
 
 # ビルド
-go build -o worktree-ui ./cmd/worktree-ui
+go build -o shiki ./cmd/shiki
 
 # テスト
 go test ./...
@@ -26,7 +29,9 @@ go test -cover ./...
 
 Bubble TeaのElm Architecture (Model-Update-View) パターンに従う。
 
-- `cmd/worktree-ui/main.go` - エントリーポイントおよび現在の全コード
+- `cmd/shiki/main.go` - 統合エントリーポイント（`--diff` フラグでdiff UIに切替）
+- `internal/tui/` - worktree UI (Model-Update-View)
+- `internal/diffui/` - diff/PR review UI (Model-Update-View)
 - `Model` - アプリケーション状態（worktreeリスト、カーソル位置）
 - `Update` - キー入力ハンドリング（vim風: j/k, 矢印キー, q/ctrl+c）
 - `View` - Lipglossによるスタイル付きレンダリング

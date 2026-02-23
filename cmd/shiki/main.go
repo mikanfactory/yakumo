@@ -13,6 +13,7 @@ import (
 	"worktree-ui/internal/branchname"
 	"worktree-ui/internal/claude"
 	"worktree-ui/internal/config"
+	"worktree-ui/internal/diffui"
 	"worktree-ui/internal/git"
 	"worktree-ui/internal/github"
 	"worktree-ui/internal/model"
@@ -21,18 +22,47 @@ import (
 )
 
 func main() {
-	zone.NewGlobal()
-
+	diffMode := flag.Bool("diff", false, "launch diff/PR review UI")
 	configPath := flag.String("config", "", "path to config file")
 	flag.Parse()
 
-	cfg, err := config.Load(*configPath)
+	if *diffMode {
+		runDiffUI()
+	} else {
+		runWorktreeUI(*configPath)
+	}
+}
+
+func runDiffUI() {
+	dir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
-	resolvedConfigPath, err := config.ResolveConfigPath(*configPath)
+	gitRunner := git.OSCommandRunner{}
+	ghRunner := github.OSRunner{}
+
+	p := tea.NewProgram(
+		diffui.NewModel(dir, gitRunner, ghRunner),
+		tea.WithAltScreen(),
+	)
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runWorktreeUI(configPath string) {
+	zone.NewGlobal()
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	resolvedConfigPath, err := config.ResolveConfigPath(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -98,12 +128,10 @@ func main() {
 			}
 
 			// Launch diff-ui in top-right pane
-			if diffUIPath := findDiffUI(); diffUIPath != "" {
-				if err := tmux.SendKeys(tmuxRunner, layout.TopRight1.PaneID, diffUIPath); err != nil {
+			if diffCmd := diffUICommand(); diffCmd != "" {
+				if err := tmux.SendKeys(tmuxRunner, layout.TopRight1.PaneID, diffCmd); err != nil {
 					fmt.Fprintf(os.Stderr, "diff-ui launch error: %v\n", err)
 				}
-			} else {
-				fmt.Fprintf(os.Stderr, "warning: diff-ui not found (searched executable directory and PATH)\n")
 			}
 		}
 		return
@@ -112,19 +140,12 @@ func main() {
 	fmt.Print(selected)
 }
 
-func findDiffUI() string {
-	// Look for diff-ui in the same directory as the current executable
-	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "diff-ui")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
+func diffUICommand() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
 	}
-	// Fall back to PATH lookup
-	if p, err := exec.LookPath("diff-ui"); err == nil {
-		return p
-	}
-	return ""
+	return exe + " --diff"
 }
 
 func findRepoByPath(cfg model.Config, repoPath string) model.RepositoryDef {

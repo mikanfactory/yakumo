@@ -1,6 +1,5 @@
 # Build artifacts
-diff-ui
-worktree-ui
+/shiki
 
 # Go build cache
 *.exe
