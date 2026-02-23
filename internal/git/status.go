@@ -1,7 +1,7 @@
 package git
 
 import (
-	"worktree-ui/internal/model"
+	"github.com/mikanfactory/shiki/internal/model"
 )
 
 const defaultBase = "origin/main"

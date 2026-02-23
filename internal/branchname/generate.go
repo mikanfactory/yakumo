@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"worktree-ui/internal/git"
+	"github.com/mikanfactory/shiki/internal/git"
 )
 
 // Generator abstracts LLM calls for testability.

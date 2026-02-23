@@ -3,7 +3,7 @@ package sidebar
 import (
 	"testing"
 
-	"worktree-ui/internal/model"
+	"github.com/mikanfactory/shiki/internal/model"
 )
 
 func TestBuildItems_SingleRepo(t *testing.T) {

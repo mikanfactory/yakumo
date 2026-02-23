@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"worktree-ui/internal/model"
+	"github.com/mikanfactory/shiki/internal/model"
 )
 
 func TestLoadFromFile(t *testing.T) {

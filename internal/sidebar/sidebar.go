@@ -1,7 +1,7 @@
 package sidebar
 
 import (
-	"worktree-ui/internal/model"
+	"github.com/mikanfactory/shiki/internal/model"
 )
 
 // BuildItems converts RepoGroups into a flat NavigableItem list

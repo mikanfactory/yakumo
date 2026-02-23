@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"worktree-ui/internal/model"
-	"worktree-ui/internal/tmux"
+	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/shiki/internal/tmux"
 )
 
 func TestIsClaudeProcess(t *testing.T) {

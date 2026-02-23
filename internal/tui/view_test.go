@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 
-	"worktree-ui/internal/model"
-	"worktree-ui/internal/sidebar"
+	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/shiki/internal/sidebar"
 )
 
 func TestView_ShowsBranchNames(t *testing.T) {

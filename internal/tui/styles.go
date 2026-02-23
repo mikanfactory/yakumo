@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"worktree-ui/internal/model"
+	"github.com/mikanfactory/shiki/internal/model"
 )
 
 // Agent status icon (U+25CF Black Circle, colored per state)

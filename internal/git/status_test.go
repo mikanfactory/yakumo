@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"worktree-ui/internal/model"
+	"github.com/mikanfactory/shiki/internal/model"
 )
 
 func TestGetBranchDiffStat(t *testing.T) {

@@ -11,15 +11,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
-	"worktree-ui/internal/agent"
-	"worktree-ui/internal/branchname"
-	"worktree-ui/internal/claude"
-	"worktree-ui/internal/config"
-	"worktree-ui/internal/git"
-	"worktree-ui/internal/github"
-	"worktree-ui/internal/model"
-	"worktree-ui/internal/sidebar"
-	"worktree-ui/internal/tmux"
+	"github.com/mikanfactory/shiki/internal/agent"
+	"github.com/mikanfactory/shiki/internal/branchname"
+	"github.com/mikanfactory/shiki/internal/claude"
+	"github.com/mikanfactory/shiki/internal/config"
+	"github.com/mikanfactory/shiki/internal/git"
+	"github.com/mikanfactory/shiki/internal/github"
+	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/shiki/internal/sidebar"
+	"github.com/mikanfactory/shiki/internal/tmux"
 )
 
 // GitDataMsg is sent when git data has been fetched.

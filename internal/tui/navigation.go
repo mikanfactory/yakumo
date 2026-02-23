@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"worktree-ui/internal/model"
+	"github.com/mikanfactory/shiki/internal/model"
 )
 
 // NextSelectable returns the next selectable index after current, or current if none.

@@ -10,13 +10,13 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"worktree-ui/internal/branchname"
-	"worktree-ui/internal/claude"
-	"worktree-ui/internal/git"
-	"worktree-ui/internal/github"
-	"worktree-ui/internal/model"
-	"worktree-ui/internal/sidebar"
-	"worktree-ui/internal/tmux"
+	"github.com/mikanfactory/shiki/internal/branchname"
+	"github.com/mikanfactory/shiki/internal/claude"
+	"github.com/mikanfactory/shiki/internal/git"
+	"github.com/mikanfactory/shiki/internal/github"
+	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/shiki/internal/sidebar"
+	"github.com/mikanfactory/shiki/internal/tmux"
 )
 
 func testModel() Model {

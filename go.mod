@@ -1,4 +1,4 @@
-module worktree-ui
+module github.com/mikanfactory/shiki
 
 go 1.24.2
 

@@ -10,15 +10,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
-	"worktree-ui/internal/branchname"
-	"worktree-ui/internal/claude"
-	"worktree-ui/internal/config"
-	"worktree-ui/internal/diffui"
-	"worktree-ui/internal/git"
-	"worktree-ui/internal/github"
-	"worktree-ui/internal/model"
-	"worktree-ui/internal/tmux"
-	"worktree-ui/internal/tui"
+	"github.com/mikanfactory/shiki/internal/branchname"
+	"github.com/mikanfactory/shiki/internal/claude"
+	"github.com/mikanfactory/shiki/internal/config"
+	"github.com/mikanfactory/shiki/internal/diffui"
+	"github.com/mikanfactory/shiki/internal/git"
+	"github.com/mikanfactory/shiki/internal/github"
+	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/shiki/internal/tmux"
+	"github.com/mikanfactory/shiki/internal/tui"
 )
 
 func main() {

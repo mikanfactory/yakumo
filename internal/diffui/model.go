@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"worktree-ui/internal/git"
-	"worktree-ui/internal/github"
+	"github.com/mikanfactory/shiki/internal/git"
+	"github.com/mikanfactory/shiki/internal/github"
 )
 
 // === Tab ===

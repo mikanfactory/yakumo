@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"worktree-ui/internal/model"
-	"worktree-ui/internal/tmux"
+	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/shiki/internal/tmux"
 )
 
 // PaneInfo holds raw tmux data for a single pane.

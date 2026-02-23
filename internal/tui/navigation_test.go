@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"worktree-ui/internal/model"
+	"github.com/mikanfactory/shiki/internal/model"
 )
 
 func makeItems(selectables ...bool) []model.NavigableItem {
