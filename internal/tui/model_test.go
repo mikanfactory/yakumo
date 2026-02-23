@@ -13,6 +13,7 @@ import (
 	"worktree-ui/internal/branchname"
 	"worktree-ui/internal/claude"
 	"worktree-ui/internal/git"
+	"worktree-ui/internal/github"
 	"worktree-ui/internal/model"
 	"worktree-ui/internal/sidebar"
 	"worktree-ui/internal/tmux"
@@ -209,7 +210,7 @@ func TestNewModel(t *testing.T) {
 	}
 	runner := &fakeRunner{}
 
-	m := NewModel(cfg, runner, "/tmp/config.yaml", nil, nil, nil)
+	m := NewModel(cfg, runner, "/tmp/config.yaml", nil, nil, nil, nil)
 
 	if m.sidebarWidth != 35 {
 		t.Errorf("sidebarWidth = %d, want 35", m.sidebarWidth)
@@ -230,7 +231,7 @@ func TestInit_ReturnsCmd(t *testing.T) {
 		},
 	}
 	runner := &fakeRunner{}
-	m := NewModel(cfg, runner, "", nil, nil, nil)
+	m := NewModel(cfg, runner, "", nil, nil, nil, nil)
 
 	cmd := m.Init()
 	if cmd == nil {
@@ -307,7 +308,7 @@ func TestZoneID(t *testing.T) {
 	}
 }
 
-func TestUpdate_Enter_AddWorktree(t *testing.T) {
+func TestUpdate_Enter_AddWorktree_EntersInputMode(t *testing.T) {
 	m := testModel()
 	m.config = model.Config{WorktreeBasePath: "/tmp/shikon"}
 
@@ -322,11 +323,17 @@ func TestUpdate_Enter_AddWorktree(t *testing.T) {
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := result.(Model)
 
-	if !updated.loading {
-		t.Error("loading should be true after pressing enter on Add worktree")
+	if !updated.addingWorktree {
+		t.Error("addingWorktree should be true after pressing enter on Add worktree")
+	}
+	if updated.addingWorktreeRepoPath != "/code/repo1" {
+		t.Errorf("addingWorktreeRepoPath = %q, want %q", updated.addingWorktreeRepoPath, "/code/repo1")
+	}
+	if updated.loading {
+		t.Error("loading should be false (not creating worktree yet)")
 	}
 	if cmd == nil {
-		t.Error("expected a command to be returned")
+		t.Error("expected textInput.Focus command to be returned")
 	}
 }
 
@@ -1220,7 +1227,7 @@ func TestRenameTimeout(t *testing.T) {
 func TestFeatureDisabled_NilDeps(t *testing.T) {
 	cfg := model.Config{SidebarWidth: 30}
 	runner := &fakeRunner{}
-	m := NewModel(cfg, runner, "", nil, nil, nil)
+	m := NewModel(cfg, runner, "", nil, nil, nil, nil)
 
 	if m.branchRenames != nil {
 		t.Error("branchRenames should be nil when feature is disabled")
@@ -1435,6 +1442,170 @@ func TestArchiveWorktreeCmd_Error(t *testing.T) {
 	}
 	if errMsg.Err == nil {
 		t.Error("expected error to be set")
+	}
+}
+
+func TestUpdate_AddWorktreeMode_Escape_Cancels(t *testing.T) {
+	m := testModel()
+	m.addingWorktree = true
+	m.addingWorktreeRepoPath = "/code/repo1"
+	m.err = fmt.Errorf("previous error")
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated := result.(Model)
+
+	if updated.addingWorktree {
+		t.Error("addingWorktree should be false after escape")
+	}
+	if updated.addingWorktreeRepoPath != "" {
+		t.Error("addingWorktreeRepoPath should be cleared after escape")
+	}
+	if updated.err != nil {
+		t.Error("err should be cleared after escape")
+	}
+}
+
+func TestUpdate_AddWorktreeMode_Enter_Empty_CreatesRandom(t *testing.T) {
+	m := testModel()
+	m.addingWorktree = true
+	m.addingWorktreeRepoPath = "/code/repo1"
+	m.config = model.Config{WorktreeBasePath: "/tmp/shikon"}
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := result.(Model)
+
+	if updated.addingWorktree {
+		t.Error("addingWorktree should be false after Enter")
+	}
+	if !updated.loading {
+		t.Error("loading should be true (creating worktree)")
+	}
+	if cmd == nil {
+		t.Error("expected addWorktreeCmd to be returned")
+	}
+}
+
+func TestUpdate_AddWorktreeMode_Enter_URL_ClonesFromURL(t *testing.T) {
+	m := testModel()
+	m.addingWorktree = true
+	m.addingWorktreeRepoPath = "/code/repo1"
+	m.config = model.Config{WorktreeBasePath: "/tmp/shikon"}
+	m.textInput.SetValue("https://github.com/owner/repo/tree/feature/my-branch")
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := result.(Model)
+
+	if updated.addingWorktree {
+		t.Error("addingWorktree should be false after Enter")
+	}
+	if !updated.loading {
+		t.Error("loading should be true (cloning from URL)")
+	}
+	if cmd == nil {
+		t.Error("expected addWorktreeFromURLCmd to be returned")
+	}
+}
+
+func TestUpdate_AddWorktreeMode_CtrlC_Quits(t *testing.T) {
+	m := testModel()
+	m.addingWorktree = true
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated := result.(Model)
+
+	if !updated.quitting {
+		t.Error("ctrl+c should quit even in addWorktree mode")
+	}
+	if cmd == nil {
+		t.Error("expected tea.Quit cmd")
+	}
+}
+
+func TestAddWorktreeFromURLCmd_BranchURL(t *testing.T) {
+	branch := "feature/my-branch"
+	fetchKey := fmt.Sprintf("/repo:%v", []string{"fetch", "origin", branch})
+	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/my-branch", branch})
+
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			fetchKey: "",
+			addKey:   "",
+		},
+	}
+
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "https://github.com/owner/repo/tree/feature/my-branch")
+	msg := cmd()
+
+	addedMsg, ok := msg.(WorktreeAddedMsg)
+	if !ok {
+		t.Fatalf("expected WorktreeAddedMsg, got %T: %v", msg, msg)
+	}
+	if addedMsg.Branch != branch {
+		t.Errorf("Branch = %q, want %q", addedMsg.Branch, branch)
+	}
+	if addedMsg.WorktreePath != "/tmp/shikon/my-branch" {
+		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/my-branch")
+	}
+}
+
+func TestAddWorktreeFromURLCmd_InvalidURL(t *testing.T) {
+	runner := git.FakeCommandRunner{}
+
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "not-a-url")
+	msg := cmd()
+
+	_, ok := msg.(WorktreeAddErrMsg)
+	if !ok {
+		t.Fatalf("expected WorktreeAddErrMsg, got %T", msg)
+	}
+}
+
+func TestAddWorktreeFromURLCmd_PR_NoGhRunner(t *testing.T) {
+	runner := git.FakeCommandRunner{}
+
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "https://github.com/owner/repo/pull/42")
+	msg := cmd()
+
+	errMsg, ok := msg.(WorktreeAddErrMsg)
+	if !ok {
+		t.Fatalf("expected WorktreeAddErrMsg, got %T", msg)
+	}
+	if errMsg.Err == nil {
+		t.Error("expected error about gh CLI not available")
+	}
+}
+
+func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
+	prURL := "https://github.com/owner/repo/pull/42"
+	ghKey := fmt.Sprintf("/repo:%v", []string{"pr", "view", prURL, "--json", "headRefName"})
+	branch := "feature/from-pr"
+	fetchKey := fmt.Sprintf("/repo:%v", []string{"fetch", "origin", branch})
+	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/from-pr", branch})
+
+	gitRunner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			fetchKey: "",
+			addKey:   "",
+		},
+	}
+	ghRunner := &github.FakeRunner{
+		Outputs: map[string]string{
+			ghKey: `{"headRefName":"feature/from-pr"}`,
+		},
+	}
+
+	cmd := addWorktreeFromURLCmd(gitRunner, ghRunner, "/repo", "/tmp/shikon", prURL)
+	msg := cmd()
+
+	addedMsg, ok := msg.(WorktreeAddedMsg)
+	if !ok {
+		t.Fatalf("expected WorktreeAddedMsg, got %T: %v", msg, msg)
+	}
+	if addedMsg.Branch != branch {
+		t.Errorf("Branch = %q, want %q", addedMsg.Branch, branch)
+	}
+	if addedMsg.WorktreePath != "/tmp/shikon/from-pr" {
+		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/from-pr")
 	}
 }
 

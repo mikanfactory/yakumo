@@ -14,6 +14,7 @@ import (
 	"worktree-ui/internal/claude"
 	"worktree-ui/internal/config"
 	"worktree-ui/internal/git"
+	"worktree-ui/internal/github"
 	"worktree-ui/internal/model"
 	"worktree-ui/internal/tmux"
 	"worktree-ui/internal/tui"
@@ -44,6 +45,11 @@ func main() {
 		tmuxRunner = tmux.OSRunner{}
 	}
 
+	var ghRunner github.Runner
+	if _, err := exec.LookPath("gh"); err == nil {
+		ghRunner = github.OSRunner{}
+	}
+
 	var claudeReader claude.Reader
 	var branchNameGen branchname.Generator
 
@@ -58,7 +64,7 @@ func main() {
 		}
 	}
 
-	m := tui.NewModel(cfg, runner, resolvedConfigPath, tmuxRunner, claudeReader, branchNameGen)
+	m := tui.NewModel(cfg, runner, resolvedConfigPath, tmuxRunner, ghRunner, claudeReader, branchNameGen)
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	result, err := p.Run()

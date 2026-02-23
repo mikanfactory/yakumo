@@ -23,6 +23,10 @@ func (m Model) View() string {
 		return renderAddRepoView(m)
 	}
 
+	if m.addingWorktree {
+		return renderAddWorktreeView(m)
+	}
+
 	if m.confirmingArchive {
 		return renderArchiveConfirmView(m)
 	}
@@ -155,6 +159,34 @@ func renderAddRepoView(m Model) string {
 	}
 
 	b.WriteString("  Enter the path to a git repository:\n\n")
+	b.WriteString("  ")
+	b.WriteString(m.textInput.View())
+	b.WriteString("\n")
+
+	if m.err != nil {
+		b.WriteString("\n")
+		b.WriteString(errorStyle.Render(fmt.Sprintf("  Error: %s", m.err.Error())))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("enter: confirm  esc: cancel"))
+
+	return b.String()
+}
+
+func renderAddWorktreeView(m Model) string {
+	var b strings.Builder
+
+	b.WriteString(titleStyle.Render("Add Worktree"))
+	b.WriteString("\n\n")
+
+	if m.loading {
+		b.WriteString("  Creating worktree...")
+		return b.String()
+	}
+
+	b.WriteString("  Paste a GitHub URL or press Enter for a new branch:\n\n")
 	b.WriteString("  ")
 	b.WriteString(m.textInput.View())
 	b.WriteString("\n")

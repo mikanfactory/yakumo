@@ -227,6 +227,54 @@ func TestRemoveWorktree_Error(t *testing.T) {
 	}
 }
 
+func TestFetchBranch(t *testing.T) {
+	runner := FakeCommandRunner{
+		Outputs: map[string]string{
+			"/repo:[fetch origin feature/my-branch]": "",
+		},
+	}
+
+	err := FetchBranch(runner, "/repo", "feature/my-branch")
+	if err != nil {
+		t.Fatalf("FetchBranch failed: %v", err)
+	}
+}
+
+func TestFetchBranch_Error(t *testing.T) {
+	runner := FakeCommandRunner{
+		Outputs: map[string]string{},
+	}
+
+	err := FetchBranch(runner, "/repo", "nonexistent-branch")
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+}
+
+func TestAddWorktreeFromBranch(t *testing.T) {
+	runner := FakeCommandRunner{
+		Outputs: map[string]string{
+			"/repo:[worktree add /tmp/new-worktree feature/my-branch]": "",
+		},
+	}
+
+	err := AddWorktreeFromBranch(runner, "/repo", "/tmp/new-worktree", "feature/my-branch")
+	if err != nil {
+		t.Fatalf("AddWorktreeFromBranch failed: %v", err)
+	}
+}
+
+func TestAddWorktreeFromBranch_Error(t *testing.T) {
+	runner := FakeCommandRunner{
+		Outputs: map[string]string{},
+	}
+
+	err := AddWorktreeFromBranch(runner, "/repo", "/tmp/new-worktree", "feature/my-branch")
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+}
+
 func assertWorktree(t *testing.T, got worktreeEntry, want WorktreeResult, label string) {
 	t.Helper()
 	if got.Path != want.Path {

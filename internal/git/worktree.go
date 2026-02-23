@@ -93,6 +93,18 @@ func AddWorktree(runner CommandRunner, repoPath, newPath, branch string) error {
 	return err
 }
 
+// FetchBranch fetches a specific branch from origin.
+func FetchBranch(runner CommandRunner, repoPath, branch string) error {
+	_, err := runner.Run(repoPath, "fetch", "origin", branch)
+	return err
+}
+
+// AddWorktreeFromBranch creates a new worktree from an existing branch.
+func AddWorktreeFromBranch(runner CommandRunner, repoPath, newPath, branch string) error {
+	_, err := runner.Run(repoPath, "worktree", "add", newPath, branch)
+	return err
+}
+
 // RenameBranch renames a branch in the given worktree directory.
 func RenameBranch(runner CommandRunner, worktreePath, oldBranch, newBranch string) error {
 	_, err := runner.Run(worktreePath, "branch", "-m", oldBranch, newBranch)

@@ -512,3 +512,46 @@ func TestView_ConfirmArchiveMode_Loading(t *testing.T) {
 		t.Errorf("confirm loading view should show removing message, got:\n%s", view)
 	}
 }
+
+func TestView_AddWorktreeMode(t *testing.T) {
+	m := testModel()
+	m.addingWorktree = true
+	m.addingWorktreeRepoPath = "/code/repo1"
+	m.textInput = textinput.New()
+
+	view := m.View()
+
+	if !strings.Contains(view, "Add Worktree") {
+		t.Errorf("view should contain 'Add Worktree' title, got:\n%s", view)
+	}
+	if !strings.Contains(view, "GitHub URL") {
+		t.Errorf("view should contain URL instruction, got:\n%s", view)
+	}
+	if !strings.Contains(view, "enter: confirm") {
+		t.Errorf("view should contain help text, got:\n%s", view)
+	}
+}
+
+func TestView_AddWorktreeMode_WithError(t *testing.T) {
+	m := testModel()
+	m.addingWorktree = true
+	m.err = fmt.Errorf("invalid URL")
+
+	view := m.View()
+
+	if !strings.Contains(view, "invalid URL") {
+		t.Errorf("view should contain error message, got:\n%s", view)
+	}
+}
+
+func TestView_AddWorktreeMode_Loading(t *testing.T) {
+	m := testModel()
+	m.addingWorktree = true
+	m.loading = true
+
+	view := m.View()
+
+	if !strings.Contains(view, "Creating worktree") {
+		t.Errorf("view should show creating message, got:\n%s", view)
+	}
+}

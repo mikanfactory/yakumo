@@ -16,6 +16,7 @@ import (
 	"worktree-ui/internal/claude"
 	"worktree-ui/internal/config"
 	"worktree-ui/internal/git"
+	"worktree-ui/internal/github"
 	"worktree-ui/internal/model"
 	"worktree-ui/internal/sidebar"
 	"worktree-ui/internal/tmux"
@@ -100,33 +101,37 @@ const renameTimeoutMs = 10 * 60 * 1000
 
 // Model is the BubbleTea model for the sidebar.
 type Model struct {
-	items             []model.NavigableItem
-	groups            []model.RepoGroup
-	cursor            int
-	sidebarWidth      int
-	selected          string
-	selectedRepoPath  string
-	quitting          bool
-	err               error
-	config            model.Config
-	runner            git.CommandRunner
-	loading           bool
-	addingRepo        bool
-	textInput         textinput.Model
-	configPath        string
-	tmuxRunner        tmux.Runner
-	agentStatus       map[string][]model.AgentInfo
-	branchRenames     map[string]model.BranchRenameInfo
-	claudeReader      claude.Reader
-	branchNameGen     branchname.Generator
-	confirmingArchive bool
-	archiveTarget     int
+	items                    []model.NavigableItem
+	groups                   []model.RepoGroup
+	cursor                   int
+	sidebarWidth             int
+	selected                 string
+	selectedRepoPath         string
+	quitting                 bool
+	err                      error
+	config                   model.Config
+	runner                   git.CommandRunner
+	loading                  bool
+	addingRepo               bool
+	addingWorktree           bool
+	addingWorktreeRepoPath   string
+	textInput                textinput.Model
+	configPath               string
+	tmuxRunner               tmux.Runner
+	ghRunner                 github.Runner
+	agentStatus              map[string][]model.AgentInfo
+	branchRenames            map[string]model.BranchRenameInfo
+	claudeReader             claude.Reader
+	branchNameGen            branchname.Generator
+	confirmingArchive        bool
+	archiveTarget            int
 }
 
 // NewModel creates a new TUI model.
 // tmuxRunner may be nil when running outside tmux (agent polling is skipped).
+// ghRunner may be nil when gh CLI is not available (PR URL cloning is skipped).
 // claudeReader and branchNameGen may be nil to disable LLM branch naming.
-func NewModel(cfg model.Config, runner git.CommandRunner, configPath string, tmuxRunner tmux.Runner, claudeReader claude.Reader, branchNameGen branchname.Generator) Model {
+func NewModel(cfg model.Config, runner git.CommandRunner, configPath string, tmuxRunner tmux.Runner, ghRunner github.Runner, claudeReader claude.Reader, branchNameGen branchname.Generator) Model {
 	ti := textinput.New()
 	ti.Placeholder = "/path/to/repository"
 	ti.CharLimit = 256
@@ -145,6 +150,7 @@ func NewModel(cfg model.Config, runner git.CommandRunner, configPath string, tmu
 		configPath:    configPath,
 		textInput:     ti,
 		tmuxRunner:    tmuxRunner,
+		ghRunner:      ghRunner,
 		branchRenames: renames,
 		claudeReader:  claudeReader,
 		branchNameGen: branchNameGen,
@@ -169,6 +175,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle add-repo input mode
 	if m.addingRepo {
 		return m.updateAddRepoMode(msg)
+	}
+
+	// Handle add-worktree input mode
+	if m.addingWorktree {
+		return m.updateAddWorktreeMode(msg)
 	}
 
 	// Handle archive confirmation mode
@@ -320,12 +331,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, tea.Quit
 					}
 					if item.Kind == model.ItemKindAddWorktree {
-						m.loading = true
-						return m, addWorktreeCmd(m.runner, item.RepoRootPath, m.config.WorktreeBasePath)
+						m.addingWorktree = true
+						m.addingWorktreeRepoPath = item.RepoRootPath
+						m.err = nil
+						m.textInput.Placeholder = "URL to clone or Enter for new branch"
+						cmd := m.textInput.Focus()
+						return m, cmd
 					}
 					if item.Kind == model.ItemKindAddRepo {
 						m.addingRepo = true
 						m.err = nil
+						m.textInput.Placeholder = "/path/to/repository"
 						cmd := m.textInput.Focus()
 						return m, cmd
 					}
@@ -367,12 +383,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Quit
 				}
 				if item.Kind == model.ItemKindAddWorktree {
-					m.loading = true
-					return m, addWorktreeCmd(m.runner, item.RepoRootPath, m.config.WorktreeBasePath)
+					m.addingWorktree = true
+					m.addingWorktreeRepoPath = item.RepoRootPath
+					m.err = nil
+					m.textInput.Placeholder = "URL to clone or Enter for new branch"
+					cmd := m.textInput.Focus()
+					return m, cmd
 				}
 				if item.Kind == model.ItemKindAddRepo {
 					m.addingRepo = true
 					m.err = nil
+					m.textInput.Placeholder = "/path/to/repository"
 					cmd := m.textInput.Focus()
 					return m, cmd
 				}
@@ -433,6 +454,59 @@ func (m Model) updateAddRepoMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.Err
 		m.loading = false
 		m.addingRepo = false
+		return m, nil
+	}
+
+	// Delegate to textinput
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m Model) updateAddWorktreeMode(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEscape:
+			m.addingWorktree = false
+			m.addingWorktreeRepoPath = ""
+			m.textInput.SetValue("")
+			m.err = nil
+			return m, nil
+		case tea.KeyEnter:
+			input := strings.TrimSpace(m.textInput.Value())
+			m.textInput.SetValue("")
+			m.addingWorktree = false
+			m.loading = true
+			m.err = nil
+			if input == "" {
+				// Empty input: create worktree with random branch name
+				return m, addWorktreeCmd(m.runner, m.addingWorktreeRepoPath, m.config.WorktreeBasePath)
+			}
+			// URL input: clone from URL
+			return m, addWorktreeFromURLCmd(m.runner, m.ghRunner, m.addingWorktreeRepoPath, m.config.WorktreeBasePath, input)
+		case tea.KeyCtrlC:
+			m.quitting = true
+			return m, tea.Quit
+		}
+
+	case WorktreeAddedMsg:
+		m.loading = true
+		m.addingWorktree = false
+		if m.branchRenames != nil && msg.WorktreePath != "" {
+			m.branchRenames[msg.WorktreePath] = model.BranchRenameInfo{
+				Status:         model.RenameStatusPending,
+				OriginalBranch: msg.Branch,
+				WorktreePath:   msg.WorktreePath,
+				CreatedAt:      msg.CreatedAt,
+			}
+		}
+		return m, fetchGitDataCmd(m.config, m.runner)
+
+	case WorktreeAddErrMsg:
+		m.err = msg.Err
+		m.loading = false
+		m.addingWorktree = false
 		return m, nil
 	}
 
@@ -510,6 +584,47 @@ func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath string) tea.Cmd
 			WorktreePath: newPath,
 			Branch:       branch,
 			CreatedAt:    createdAt,
+		}
+	}
+}
+
+func addWorktreeFromURLCmd(runner git.CommandRunner, ghRunner github.Runner, repoPath, basePath, rawURL string) tea.Cmd {
+	return func() tea.Msg {
+		urlInfo, err := github.ParseGitHubURL(rawURL)
+		if err != nil {
+			return WorktreeAddErrMsg{Err: fmt.Errorf("invalid URL: %w", err)}
+		}
+
+		var branch string
+		switch urlInfo.Type {
+		case github.URLTypeBranch:
+			branch = urlInfo.Branch
+		case github.URLTypePR:
+			if ghRunner == nil {
+				return WorktreeAddErrMsg{Err: fmt.Errorf("gh CLI is not available; cannot resolve PR URL")}
+			}
+			prBranch, err := github.FetchPRBranch(ghRunner, repoPath, rawURL)
+			if err != nil {
+				return WorktreeAddErrMsg{Err: fmt.Errorf("resolving PR branch: %w", err)}
+			}
+			branch = prBranch
+		}
+
+		if err := git.FetchBranch(runner, repoPath, branch); err != nil {
+			return WorktreeAddErrMsg{Err: fmt.Errorf("fetching branch %q: %w", branch, err)}
+		}
+
+		slug := github.BranchSlug(branch)
+		newPath := filepath.Join(basePath, slug)
+
+		if err := git.AddWorktreeFromBranch(runner, repoPath, newPath, branch); err != nil {
+			return WorktreeAddErrMsg{Err: fmt.Errorf("creating worktree: %w", err)}
+		}
+
+		return WorktreeAddedMsg{
+			WorktreePath: newPath,
+			Branch:       branch,
+			CreatedAt:    time.Now().UnixMilli(),
 		}
 	}
 }
