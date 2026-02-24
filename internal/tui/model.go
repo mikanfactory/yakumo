@@ -11,15 +11,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
-	"github.com/mikanfactory/shiki/internal/agent"
-	"github.com/mikanfactory/shiki/internal/branchname"
-	"github.com/mikanfactory/shiki/internal/claude"
-	"github.com/mikanfactory/shiki/internal/config"
-	"github.com/mikanfactory/shiki/internal/git"
-	"github.com/mikanfactory/shiki/internal/github"
-	"github.com/mikanfactory/shiki/internal/model"
-	"github.com/mikanfactory/shiki/internal/sidebar"
-	"github.com/mikanfactory/shiki/internal/tmux"
+	"github.com/mikanfactory/yakumo/internal/agent"
+	"github.com/mikanfactory/yakumo/internal/branchname"
+	"github.com/mikanfactory/yakumo/internal/claude"
+	"github.com/mikanfactory/yakumo/internal/config"
+	"github.com/mikanfactory/yakumo/internal/git"
+	"github.com/mikanfactory/yakumo/internal/github"
+	"github.com/mikanfactory/yakumo/internal/model"
+	"github.com/mikanfactory/yakumo/internal/sidebar"
+	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
 // GitDataMsg is sent when git data has been fetched.

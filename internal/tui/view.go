@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
 
-	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/yakumo/internal/model"
 )
 
 func (m Model) View() string {

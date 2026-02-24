@@ -1,7 +1,7 @@
 package sidebar
 
 import (
-	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/yakumo/internal/model"
 )
 
 // BuildItems converts RepoGroups into a flat NavigableItem list

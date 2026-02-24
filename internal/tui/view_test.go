@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 
-	"github.com/mikanfactory/shiki/internal/model"
-	"github.com/mikanfactory/shiki/internal/sidebar"
+	"github.com/mikanfactory/yakumo/internal/model"
+	"github.com/mikanfactory/yakumo/internal/sidebar"
 )
 
 func TestView_ShowsBranchNames(t *testing.T) {

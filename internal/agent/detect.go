@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/mikanfactory/shiki/internal/model"
-	"github.com/mikanfactory/shiki/internal/tmux"
+	"github.com/mikanfactory/yakumo/internal/model"
+	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
 // PaneInfo holds raw tmux data for a single pane.

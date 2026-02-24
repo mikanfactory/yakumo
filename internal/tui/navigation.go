@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/yakumo/internal/model"
 )
 
 // NextSelectable returns the next selectable index after current, or current if none.

@@ -29,10 +29,10 @@ func TestParseGitHubURL_BranchURL(t *testing.T) {
 		},
 		{
 			name:       "branch with username prefix",
-			url:        "https://github.com/mikan/shiki/tree/mikanfactory/fix-login",
+			url:        "https://github.com/mikan/yakumo/tree/mikanfactory/fix-login",
 			wantBranch: "mikanfactory/fix-login",
 			wantOwner:  "mikan",
-			wantRepo:   "shiki",
+			wantRepo:   "yakumo",
 		},
 		{
 			name:       "branch with multiple slashes",

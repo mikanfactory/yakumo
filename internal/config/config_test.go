@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/yakumo/internal/model"
 )
 
 func TestLoadFromFile(t *testing.T) {
@@ -151,7 +151,7 @@ func TestEnsureDefaultConfig_CreatesFile(t *testing.T) {
 		t.Error("expected created=true")
 	}
 
-	wantPath := filepath.Join(tmpHome, ".config", "shiki", "config.yaml")
+	wantPath := filepath.Join(tmpHome, ".config", "yakumo", "config.yaml")
 	if path != wantPath {
 		t.Errorf("path = %q, want %q", path, wantPath)
 	}
@@ -173,7 +173,7 @@ func TestEnsureDefaultConfig_AlreadyExists(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
-	configDir := filepath.Join(tmpHome, ".config", "shiki")
+	configDir := filepath.Join(tmpHome, ".config", "yakumo")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestResolveConfigPath(t *testing.T) {
 		tmpHome := t.TempDir()
 		t.Setenv("HOME", tmpHome)
 
-		configDir := filepath.Join(tmpHome, ".config", "shiki")
+		configDir := filepath.Join(tmpHome, ".config", "yakumo")
 		if err := os.MkdirAll(configDir, 0o755); err != nil {
 			t.Fatal(err)
 		}

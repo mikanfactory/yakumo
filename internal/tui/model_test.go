@@ -10,13 +10,13 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/mikanfactory/shiki/internal/branchname"
-	"github.com/mikanfactory/shiki/internal/claude"
-	"github.com/mikanfactory/shiki/internal/git"
-	"github.com/mikanfactory/shiki/internal/github"
-	"github.com/mikanfactory/shiki/internal/model"
-	"github.com/mikanfactory/shiki/internal/sidebar"
-	"github.com/mikanfactory/shiki/internal/tmux"
+	"github.com/mikanfactory/yakumo/internal/branchname"
+	"github.com/mikanfactory/yakumo/internal/claude"
+	"github.com/mikanfactory/yakumo/internal/git"
+	"github.com/mikanfactory/yakumo/internal/github"
+	"github.com/mikanfactory/yakumo/internal/model"
+	"github.com/mikanfactory/yakumo/internal/sidebar"
+	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
 func testModel() Model {
@@ -737,7 +737,7 @@ func TestValidateRepoCmd_TildeExpansion(t *testing.T) {
 	}
 
 	// ~/nonexistent will expand but the path won't exist on disk
-	cmd := validateRepoCmd(runner, "~/nonexistent-shiki-test-path")
+	cmd := validateRepoCmd(runner, "~/nonexistent-yakumo-test-path")
 	msg := cmd()
 
 	_, ok := msg.(RepoValidationErrMsg)

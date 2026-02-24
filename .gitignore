@@ -1,5 +1,5 @@
 # Build artifacts
-/shiki
+/yakumo
 
 # Go build cache
 *.exe

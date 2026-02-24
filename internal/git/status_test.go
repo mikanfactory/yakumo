@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/yakumo/internal/model"
 )
 
 func TestGetBranchDiffStat(t *testing.T) {

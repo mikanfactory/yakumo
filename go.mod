@@ -1,4 +1,4 @@
-module github.com/mikanfactory/shiki
+module github.com/mikanfactory/yakumo
 
 go 1.24.2
 

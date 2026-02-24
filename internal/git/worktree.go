@@ -3,7 +3,7 @@ package git
 import (
 	"strings"
 
-	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/yakumo/internal/model"
 )
 
 type worktreeEntry struct {

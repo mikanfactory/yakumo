@@ -1,7 +1,7 @@
 package git
 
 import (
-	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/yakumo/internal/model"
 )
 
 const defaultBase = "origin/main"

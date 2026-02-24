@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/yakumo/internal/model"
 )
 
 const DefaultSidebarWidth = 30
@@ -71,7 +71,7 @@ func ResolveConfigPath(flagPath string) (string, error) {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}
 
-	defaultPath := filepath.Join(home, ".config", "shiki", "config.yaml")
+	defaultPath := filepath.Join(home, ".config", "yakumo", "config.yaml")
 	if _, err := os.Stat(defaultPath); err != nil {
 		return "", fmt.Errorf("default config not found at %s: create it or use --config flag", defaultPath)
 	}
@@ -102,7 +102,7 @@ func EnsureDefaultConfig() (string, bool, error) {
 		return "", false, fmt.Errorf("getting home directory: %w", err)
 	}
 
-	configDir := filepath.Join(home, ".config", "shiki")
+	configDir := filepath.Join(home, ".config", "yakumo")
 	configPath := filepath.Join(configDir, "config.yaml")
 
 	if _, err := os.Stat(configPath); err == nil {

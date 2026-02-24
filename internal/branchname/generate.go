@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mikanfactory/shiki/internal/git"
+	"github.com/mikanfactory/yakumo/internal/git"
 )
 
 // Generator abstracts LLM calls for testability.

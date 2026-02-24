@@ -3,7 +3,7 @@ package sidebar
 import (
 	"testing"
 
-	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/yakumo/internal/model"
 )
 
 func TestBuildItems_SingleRepo(t *testing.T) {

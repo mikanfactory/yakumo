@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/mikanfactory/shiki/internal/model"
+	"github.com/mikanfactory/yakumo/internal/model"
 )
 
 func makeItems(selectables ...bool) []model.NavigableItem {

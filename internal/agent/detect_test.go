@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/mikanfactory/shiki/internal/model"
-	"github.com/mikanfactory/shiki/internal/tmux"
+	"github.com/mikanfactory/yakumo/internal/model"
+	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
 func TestIsClaudeProcess(t *testing.T) {
