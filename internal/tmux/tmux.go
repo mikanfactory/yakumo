@@ -61,6 +61,15 @@ func SendKeys(runner Runner, target string, command string) error {
 	return nil
 }
 
+// SelectPane selects a specific tmux pane by its ID.
+func SelectPane(runner Runner, paneID string) error {
+	_, err := runner.Run("select-pane", "-t", paneID)
+	if err != nil {
+		return fmt.Errorf("selecting pane %s: %w", paneID, err)
+	}
+	return nil
+}
+
 // parseWindowList parses `tmux list-windows` output and returns the window index
 // for the window matching the given name, or empty string if not found.
 func parseWindowList(output string, windowName string) string {

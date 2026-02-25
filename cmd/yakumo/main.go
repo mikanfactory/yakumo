@@ -139,21 +139,15 @@ func runWorktreeUI(configPath string) {
 
 	if tmux.IsInsideTmux() {
 		tmuxRunner := tmux.OSRunner{}
-		layout, err := tmux.SelectWorktreeSession(tmuxRunner, selected)
+		repo := findRepoByPath(cfg, finalModel.SelectedRepoPath())
+		layout, err := tmux.SelectWorktreeSession(tmuxRunner, selected, repo.StartupCommand)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tmux error: %v\n", err)
 			os.Exit(1)
 		}
 
-		// Run startup commands only for newly created sessions
+		// Run additional commands only for newly created sessions
 		if layout.BottomRight1.PaneID != "" {
-			repo := findRepoByPath(cfg, finalModel.SelectedRepoPath())
-			if repo.StartupCommand != "" {
-				if err := tmux.SendKeys(tmuxRunner, layout.BottomRight1.PaneID, repo.StartupCommand); err != nil {
-					fmt.Fprintf(os.Stderr, "startup command error: %v\n", err)
-				}
-			}
-
 			// Launch diff-ui in top-right pane
 			if diffCmd := diffUICommand(); diffCmd != "" {
 				if err := tmux.SendKeys(tmuxRunner, layout.TopRight1.PaneID, diffCmd); err != nil {
@@ -161,11 +155,22 @@ func runWorktreeUI(configPath string) {
 				}
 			}
 
-			// Launch claude CLI in center pane
+			// Ensure claude trust and launch claude CLI in center pane
 			if _, err := exec.LookPath("claude"); err == nil {
+				if home, err := os.UserHomeDir(); err == nil {
+					configPath := filepath.Join(home, ".claude.json")
+					if trustErr := claude.EnsureDirectoryTrusted(configPath, selected); trustErr != nil {
+						fmt.Fprintf(os.Stderr, "claude trust warning: %v\n", trustErr)
+					}
+				}
 				if err := tmux.SendKeys(tmuxRunner, layout.Center1.PaneID, "claude"); err != nil {
 					fmt.Fprintf(os.Stderr, "claude launch error: %v\n", err)
 				}
+			}
+
+			// Focus center pane after all commands are sent
+			if err := tmux.SelectPane(tmuxRunner, layout.Center1.PaneID); err != nil {
+				fmt.Fprintf(os.Stderr, "select pane error: %v\n", err)
 			}
 		}
 		return
