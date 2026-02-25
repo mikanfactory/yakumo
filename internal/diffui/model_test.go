@@ -44,19 +44,19 @@ func TestEnterOpensVimInIdleCenterPane(t *testing.T) {
 
 	runner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			"[display-message -p #{session_name}]":                              "dev",
-			"[display-message -p -t dev:main-window.0 #{pane_current_command}]": "node",
-			"[display-message -p -t dev:background-window.0 #{pane_current_command}]": "zsh",
-			"[send-keys -t dev:background-window.0 vim /repo/file.go Enter]":          "",
-			"[swap-pane -d -s dev:background-window.0 -t dev:main-window.0]":          "",
-			"[select-pane -t dev:main-window.0]":                                      "",
+			"[display-message -p -t dev:main-window.0 #{pane_current_command}]":        "node",
+			"[display-message -p -t dev:background-window.0 #{pane_current_command}]":  "zsh",
+			"[send-keys -t dev:background-window.0 vim /repo/file.go Enter]":           "",
+			"[swap-pane -d -s dev:background-window.0 -t dev:main-window.0]":           "",
+			"[select-pane -t dev:main-window.0]":                                       "",
 		},
 	}
 
 	m := Model{
-		activeTab:  TabChanges,
-		repoDir:    "/repo",
-		tmuxRunner: runner,
+		activeTab:   TabChanges,
+		repoDir:     "/repo",
+		tmuxRunner:  runner,
+		sessionName: "dev",
 		changes: ChangesModel{
 			files:  []ChangedFile{{Path: "file.go"}},
 			cursor: 0,
@@ -78,18 +78,19 @@ func TestEnterOpensVimInIdleCenterPane(t *testing.T) {
 		t.Errorf("expected no error, got %v", msg.Err)
 	}
 
-	// Verify: session name + pane check (main-window.0) + pane check (bg.0) + send-keys + swap-pane + select-pane
-	if len(runner.Calls) != 6 {
-		t.Fatalf("expected 6 tmux calls, got %d: %v", len(runner.Calls), runner.Calls)
+	// Verify: pane check (main-window.0) + pane check (bg.0) + send-keys + swap-pane + select-pane
+	// Session name is cached so no display-message call for it.
+	if len(runner.Calls) != 5 {
+		t.Fatalf("expected 5 tmux calls, got %d: %v", len(runner.Calls), runner.Calls)
 	}
-	if runner.Calls[3][0] != "send-keys" {
-		t.Errorf("expected send-keys call, got %v", runner.Calls[3])
+	if runner.Calls[2][0] != "send-keys" {
+		t.Errorf("expected send-keys call, got %v", runner.Calls[2])
 	}
-	if runner.Calls[4][0] != "swap-pane" {
-		t.Errorf("expected swap-pane call, got %v", runner.Calls[4])
+	if runner.Calls[3][0] != "swap-pane" {
+		t.Errorf("expected swap-pane call, got %v", runner.Calls[3])
 	}
-	if runner.Calls[5][0] != "select-pane" {
-		t.Errorf("expected select-pane call, got %v", runner.Calls[5])
+	if runner.Calls[4][0] != "select-pane" {
+		t.Errorf("expected select-pane call, got %v", runner.Calls[4])
 	}
 }
 
@@ -98,7 +99,6 @@ func TestEnterOpensVimInMainCenterPane_NoSwap(t *testing.T) {
 
 	runner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			"[display-message -p #{session_name}]":                              "dev",
 			"[display-message -p -t dev:main-window.0 #{pane_current_command}]": "-zsh",
 			"[send-keys -t dev:main-window.0 vim /repo/main.go Enter]":         "",
 			"[select-pane -t dev:main-window.0]":                               "",
@@ -106,9 +106,10 @@ func TestEnterOpensVimInMainCenterPane_NoSwap(t *testing.T) {
 	}
 
 	m := Model{
-		activeTab:  TabChanges,
-		repoDir:    "/repo",
-		tmuxRunner: runner,
+		activeTab:   TabChanges,
+		repoDir:     "/repo",
+		tmuxRunner:  runner,
+		sessionName: "dev",
 		changes: ChangesModel{
 			files:  []ChangedFile{{Path: "main.go"}},
 			cursor: 0,
@@ -136,7 +137,6 @@ func TestEnterAllCenterPanesBusy(t *testing.T) {
 
 	runner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			"[display-message -p #{session_name}]":                                     "dev",
 			"[display-message -p -t dev:main-window.0 #{pane_current_command}]":        "node",
 			"[display-message -p -t dev:background-window.0 #{pane_current_command}]":  "claude",
 			"[display-message -p -t dev:background-window.1 #{pane_current_command}]":  "vim",
@@ -144,9 +144,10 @@ func TestEnterAllCenterPanesBusy(t *testing.T) {
 	}
 
 	m := Model{
-		activeTab:  TabChanges,
-		repoDir:    "/repo",
-		tmuxRunner: runner,
+		activeTab:   TabChanges,
+		repoDir:     "/repo",
+		tmuxRunner:  runner,
+		sessionName: "dev",
 		changes: ChangesModel{
 			files:  []ChangedFile{{Path: "file.go"}},
 			cursor: 0,
@@ -162,6 +163,51 @@ func TestEnterAllCenterPanesBusy(t *testing.T) {
 	}
 	if msg.Err == nil {
 		t.Fatal("expected error when all panes are busy")
+	}
+}
+
+func TestEnterFallsBackToCurrentSessionName(t *testing.T) {
+	t.Setenv("TMUX_PANE", "")
+	runner := &tmux.FakeRunner{
+		Outputs: map[string]string{
+			"[display-message -p #{session_name}]":                                     "dev",
+			"[display-message -p -t dev:main-window.0 #{pane_current_command}]":        "-zsh",
+			"[send-keys -t dev:main-window.0 vim /repo/file.go Enter]":                "",
+			"[select-pane -t dev:main-window.0]":                                      "",
+		},
+	}
+
+	m := Model{
+		activeTab:  TabChanges,
+		repoDir:    "/repo",
+		tmuxRunner: runner,
+		// sessionName is empty — should fall back to CurrentSessionName
+		changes: ChangesModel{
+			files:  []ChangedFile{{Path: "file.go"}},
+			cursor: 0,
+		},
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected a command, got nil")
+	}
+
+	result := cmd()
+	msg, ok := result.(OpenVimResultMsg)
+	if !ok {
+		t.Fatalf("expected OpenVimResultMsg, got %T", result)
+	}
+	if msg.Err != nil {
+		t.Errorf("expected no error, got %v", msg.Err)
+	}
+
+	// Verify: display-message for session + pane check + send-keys + select-pane
+	if len(runner.Calls) != 4 {
+		t.Fatalf("expected 4 tmux calls, got %d: %v", len(runner.Calls), runner.Calls)
+	}
+	if runner.Calls[0][0] != "display-message" {
+		t.Errorf("expected display-message call for session, got %v", runner.Calls[0])
 	}
 }
 

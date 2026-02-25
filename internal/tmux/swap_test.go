@@ -6,9 +6,8 @@ import (
 )
 
 func TestCurrentSessionName(t *testing.T) {
-	t.Setenv("TMUX_PANE", "")
-
-	t.Run("success", func(t *testing.T) {
+	t.Run("success without TMUX_PANE", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{
 			Outputs: map[string]string{
 				"[display-message -p #{session_name}]": "my-session\n",
@@ -23,23 +22,24 @@ func TestCurrentSessionName(t *testing.T) {
 		}
 	})
 
-	t.Run("with TMUX_PANE env", func(t *testing.T) {
+	t.Run("success with TMUX_PANE", func(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%5")
 		runner := &FakeRunner{
 			Outputs: map[string]string{
-				"[display-message -p -t %5 #{session_name}]": "my-session\n",
+				"[display-message -p -t %5 #{session_name}]": "correct-session\n",
 			},
 		}
 		name, err := CurrentSessionName(runner)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if name != "my-session" {
-			t.Errorf("expected %q, got %q", "my-session", name)
+		if name != "correct-session" {
+			t.Errorf("expected %q, got %q", "correct-session", name)
 		}
 	})
 
 	t.Run("error", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{
 			Errors: map[string]error{
 				"[display-message -p #{session_name}]": errors.New("not in tmux"),
@@ -56,6 +56,7 @@ func TestSwapCenter(t *testing.T) {
 	t.Setenv("TMUX_PANE", "")
 
 	t.Run("success", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{
 			Outputs: map[string]string{
 				"[display-message -p #{session_name}]":                                              "dev",
@@ -74,6 +75,7 @@ func TestSwapCenter(t *testing.T) {
 	})
 
 	t.Run("session name error", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{
 			Errors: map[string]error{
 				"[display-message -p #{session_name}]": errors.New("fail"),
@@ -87,6 +89,7 @@ func TestSwapCenter(t *testing.T) {
 	})
 
 	t.Run("first swap error", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{
 			Outputs: map[string]string{
 				"[display-message -p #{session_name}]": "dev",
@@ -103,6 +106,7 @@ func TestSwapCenter(t *testing.T) {
 	})
 
 	t.Run("second swap error", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{
 			Outputs: map[string]string{
 				"[display-message -p #{session_name}]":                            "dev",
@@ -124,6 +128,7 @@ func TestSwapRightBelow(t *testing.T) {
 	t.Setenv("TMUX_PANE", "")
 
 	t.Run("success", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{
 			Outputs: map[string]string{
 				"[display-message -p #{session_name}]":                                  "dev",
@@ -142,6 +147,7 @@ func TestSwapRightBelow(t *testing.T) {
 	})
 
 	t.Run("session name error", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{
 			Errors: map[string]error{
 				"[display-message -p #{session_name}]": errors.New("fail"),
@@ -155,6 +161,7 @@ func TestSwapRightBelow(t *testing.T) {
 	})
 
 	t.Run("first swap error", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{
 			Outputs: map[string]string{
 				"[display-message -p #{session_name}]": "dev",
@@ -171,6 +178,7 @@ func TestSwapRightBelow(t *testing.T) {
 	})
 
 	t.Run("second swap error", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{
 			Outputs: map[string]string{
 				"[display-message -p #{session_name}]":                            "dev",

@@ -102,10 +102,11 @@ type Model struct {
 	height    int
 	quitting  bool
 
-	repoDir    string
-	gitRunner  git.CommandRunner
-	ghRunner   github.Runner
-	tmuxRunner tmux.Runner // nil when not inside tmux
+	repoDir     string
+	gitRunner   git.CommandRunner
+	ghRunner    github.Runner
+	tmuxRunner  tmux.Runner // nil when not inside tmux
+	sessionName string      // cached tmux session name (empty when not in tmux)
 
 	statusMsg string
 
@@ -115,15 +116,17 @@ type Model struct {
 
 // NewModel creates a new diff UI model.
 // tmuxRunner may be nil when running outside tmux (vim opens in the current pane).
-func NewModel(repoDir string, gitRunner git.CommandRunner, ghRunner github.Runner, tmuxRunner tmux.Runner) Model {
+// sessionName is the cached tmux session name; pass "" if unknown.
+func NewModel(repoDir string, gitRunner git.CommandRunner, ghRunner github.Runner, tmuxRunner tmux.Runner, sessionName string) Model {
 	return Model{
-		activeTab:  TabChanges,
-		width:      80,
-		height:     24,
-		repoDir:    repoDir,
-		gitRunner:  gitRunner,
-		ghRunner:   ghRunner,
-		tmuxRunner: tmuxRunner,
+		activeTab:   TabChanges,
+		width:       80,
+		height:      24,
+		repoDir:     repoDir,
+		gitRunner:   gitRunner,
+		ghRunner:    ghRunner,
+		tmuxRunner:  tmuxRunner,
+		sessionName: sessionName,
 		changes: ChangesModel{
 			loading: true,
 		},
@@ -226,7 +229,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				fullPath := filepath.Join(m.repoDir, file.Path)
 
 				if m.tmuxRunner != nil {
-					return m, openVimInIdleCenterPaneCmd(m.tmuxRunner, fullPath)
+					return m, openVimInIdleCenterPaneCmd(m.tmuxRunner, fullPath, m.sessionName)
 				}
 
 				// Fallback: open vim in the current pane (non-tmux environment)
@@ -314,11 +317,16 @@ func isShellCommand(cmd string) bool {
 
 // openVimInIdleCenterPaneCmd finds an idle center pane, sends vim there,
 // swaps it to main-window if needed, and focuses it.
-func openVimInIdleCenterPaneCmd(runner tmux.Runner, filePath string) tea.Cmd {
+// When sessionName is non-empty it is used directly; otherwise CurrentSessionName is called as a fallback.
+func openVimInIdleCenterPaneCmd(runner tmux.Runner, filePath string, sessionName string) tea.Cmd {
 	return func() tea.Msg {
-		session, err := tmux.CurrentSessionName(runner)
-		if err != nil {
-			return OpenVimResultMsg{Err: fmt.Errorf("セッション名の取得に失敗: %w", err)}
+		session := sessionName
+		if session == "" {
+			var err error
+			session, err = tmux.CurrentSessionName(runner)
+			if err != nil {
+				return OpenVimResultMsg{Err: fmt.Errorf("セッション名の取得に失敗: %w", err)}
+			}
 		}
 
 		targets := centerPaneTargets(session)

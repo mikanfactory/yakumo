@@ -90,6 +90,28 @@ func TestFakeGenerator_Error(t *testing.T) {
 	}
 }
 
+func TestSlugFromBranch(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"shoji/fix-login-redirect", "fix-login-redirect"},
+		{"fix-login-redirect", "fix-login-redirect"},
+		{"shoji/south-korea", "south-korea"},
+		{"feature/add-auth/extra", "add-auth/extra"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := SlugFromBranch(tt.input)
+			if got != tt.want {
+				t.Errorf("SlugFromBranch(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFilterEnv(t *testing.T) {
 	env := []string{
 		"PATH=/usr/bin",

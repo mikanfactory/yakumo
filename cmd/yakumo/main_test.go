@@ -15,9 +15,9 @@ func TestLaunchRenameWatcher(t *testing.T) {
 	}
 
 	// Allow any send-keys call to succeed
-	runner.Outputs[fmt.Sprintf("%v", []string{"send-keys", "-t", "%5", "'/usr/local/bin/yakumo' watch-rename --path '/tmp/test worktree' --branch 'shoji/south-korea' --created-at 1234567890", "Enter"})] = ""
+	runner.Outputs[fmt.Sprintf("%v", []string{"send-keys", "-t", "%5", "'/usr/local/bin/yakumo' watch-rename --path '/tmp/test worktree' --branch 'shoji/south-korea' --created-at 1234567890 --session-name 'test-worktree'", "Enter"})] = ""
 
-	err := launchRenameWatcher(runner, "%5", "/tmp/test worktree", "shoji/south-korea", 1234567890)
+	err := launchRenameWatcher(runner, "%5", "/tmp/test worktree", "shoji/south-korea", "test-worktree", 1234567890)
 	if err != nil {
 		// SendKeys may fail due to executable path, so we just check the call was made
 		// Verify at least one call was recorded
@@ -53,6 +53,9 @@ func TestLaunchRenameWatcher(t *testing.T) {
 	}
 	if !strings.Contains(cmdStr, strconv.FormatInt(1234567890, 10)) {
 		t.Errorf("expected command to contain timestamp, got %q", cmdStr)
+	}
+	if !strings.Contains(cmdStr, "--session-name") {
+		t.Errorf("expected command to contain '--session-name', got %q", cmdStr)
 	}
 }
 

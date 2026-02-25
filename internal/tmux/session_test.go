@@ -172,6 +172,140 @@ func TestKillSession_Error(t *testing.T) {
 	}
 }
 
+// --- RenameSession tests ---
+
+func TestRenameSession_Success(t *testing.T) {
+	runner := &FakeRunner{
+		Outputs: map[string]string{
+			"[rename-session -t old-name new-name]": "",
+		},
+	}
+
+	err := RenameSession(runner, "old-name", "new-name")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(runner.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.Calls))
+	}
+}
+
+func TestRenameSession_Error(t *testing.T) {
+	runner := &FakeRunner{
+		Errors: map[string]error{
+			"[rename-session -t nonexistent new-name]": fmt.Errorf("session not found"),
+		},
+	}
+
+	err := RenameSession(runner, "nonexistent", "new-name")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+// --- ResolveSessionName tests ---
+
+func TestResolveSessionName_DefaultExists(t *testing.T) {
+	runner := &FakeRunner{
+		Outputs: map[string]string{
+			"[has-session -t south-korea]": "",
+		},
+	}
+
+	name := ResolveSessionName(runner, "/repos/south-korea", nil)
+	if name != "south-korea" {
+		t.Errorf("got %q, want %q", name, "south-korea")
+	}
+}
+
+func TestResolveSessionName_SlugExists(t *testing.T) {
+	runner := &FakeRunner{
+		Errors: map[string]error{
+			"[has-session -t south-korea]": fmt.Errorf("not found"),
+		},
+		Outputs: map[string]string{
+			"[has-session -t fix-login]": "",
+		},
+	}
+
+	getBranch := func(worktreePath string) (string, error) {
+		return "shoji/fix-login", nil
+	}
+
+	name := ResolveSessionName(runner, "/repos/south-korea", getBranch)
+	if name != "fix-login" {
+		t.Errorf("got %q, want %q", name, "fix-login")
+	}
+}
+
+func TestResolveSessionName_NeitherExists(t *testing.T) {
+	runner := &FakeRunner{
+		Errors: map[string]error{
+			"[has-session -t south-korea]": fmt.Errorf("not found"),
+			"[has-session -t fix-login]":   fmt.Errorf("not found"),
+		},
+	}
+
+	getBranch := func(worktreePath string) (string, error) {
+		return "shoji/fix-login", nil
+	}
+
+	name := ResolveSessionName(runner, "/repos/south-korea", getBranch)
+	if name != "south-korea" {
+		t.Errorf("got %q, want %q", name, "south-korea")
+	}
+}
+
+func TestResolveSessionName_NilBranchGetter(t *testing.T) {
+	runner := &FakeRunner{
+		Errors: map[string]error{
+			"[has-session -t south-korea]": fmt.Errorf("not found"),
+		},
+	}
+
+	name := ResolveSessionName(runner, "/repos/south-korea", nil)
+	if name != "south-korea" {
+		t.Errorf("got %q, want %q", name, "south-korea")
+	}
+}
+
+func TestResolveSessionName_BranchGetterError(t *testing.T) {
+	runner := &FakeRunner{
+		Errors: map[string]error{
+			"[has-session -t south-korea]": fmt.Errorf("not found"),
+		},
+	}
+
+	getBranch := func(worktreePath string) (string, error) {
+		return "", fmt.Errorf("git error")
+	}
+
+	name := ResolveSessionName(runner, "/repos/south-korea", getBranch)
+	if name != "south-korea" {
+		t.Errorf("got %q, want %q", name, "south-korea")
+	}
+}
+
+func TestResolveSessionName_NoPrefixBranch(t *testing.T) {
+	runner := &FakeRunner{
+		Errors: map[string]error{
+			"[has-session -t south-korea]": fmt.Errorf("not found"),
+		},
+		Outputs: map[string]string{
+			"[has-session -t fix-login]": "",
+		},
+	}
+
+	getBranch := func(worktreePath string) (string, error) {
+		return "fix-login", nil
+	}
+
+	name := ResolveSessionName(runner, "/repos/south-korea", getBranch)
+	if name != "fix-login" {
+		t.Errorf("got %q, want %q", name, "fix-login")
+	}
+}
+
 // --- SwitchToSession tests ---
 
 func TestSwitchToSession_Success(t *testing.T) {
@@ -518,7 +652,7 @@ func TestSelectWorktreeSession_ExistingSession(t *testing.T) {
 		},
 	}
 
-	layout, err := SelectWorktreeSession(runner, "/repos/my-worktree", "")
+	layout, err := SelectWorktreeSession(runner, "/repos/my-worktree", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -552,7 +686,7 @@ func TestSelectWorktreeSession_NewSession(t *testing.T) {
 		},
 	}
 
-	layout, err := SelectWorktreeSession(runner, "/repos/feat", "")
+	layout, err := SelectWorktreeSession(runner, "/repos/feat", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -572,7 +706,7 @@ func TestSelectWorktreeSession_CreateError(t *testing.T) {
 		},
 	}
 
-	_, err := SelectWorktreeSession(runner, "/bad", "")
+	_, err := SelectWorktreeSession(runner, "/bad", "", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -596,7 +730,7 @@ func TestSelectWorktreeSession_SwitchAfterCreateError(t *testing.T) {
 		},
 	}
 
-	_, err := SelectWorktreeSession(runner, "/repos/feat", "")
+	_, err := SelectWorktreeSession(runner, "/repos/feat", "", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
