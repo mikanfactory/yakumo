@@ -266,7 +266,7 @@ func (m ChecksModel) update(msg tea.KeyMsg) ChecksModel {
 
 func fetchChangesCmd(runner git.CommandRunner, dir string) tea.Cmd {
 	return func() tea.Msg {
-		entries, err := git.GetDiffNumstat(runner, dir, "origin/main")
+		entries, err := git.GetAllChanges(runner, dir, "origin/main")
 		if err != nil {
 			return ChangesDataErrMsg{Err: err}
 		}
