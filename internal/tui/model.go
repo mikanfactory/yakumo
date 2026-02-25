@@ -577,6 +577,15 @@ func archiveWorktreeCmd(runner git.CommandRunner, repoRootPath, worktreePath str
 	}
 }
 
+func repoNameFromConfig(cfg model.Config, repoPath string) string {
+	for _, repo := range cfg.Repositories {
+		if repo.Path == repoPath {
+			return repo.Name
+		}
+	}
+	return filepath.Base(repoPath)
+}
+
 func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath string) tea.Cmd {
 	return func() tea.Msg {
 		userName, err := git.GetUserName(runner, repoPath)

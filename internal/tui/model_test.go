@@ -369,6 +369,29 @@ func TestUpdate_WorktreeAddErrMsg(t *testing.T) {
 	}
 }
 
+func TestRepoNameFromConfig(t *testing.T) {
+	cfg := model.Config{
+		Repositories: []model.RepositoryDef{
+			{Name: "yakumo", Path: "/code/yakumo"},
+			{Name: "other", Path: "/code/other"},
+		},
+	}
+
+	t.Run("match", func(t *testing.T) {
+		got := repoNameFromConfig(cfg, "/code/yakumo")
+		if got != "yakumo" {
+			t.Errorf("repoNameFromConfig() = %q, want %q", got, "yakumo")
+		}
+	})
+
+	t.Run("fallback", func(t *testing.T) {
+		got := repoNameFromConfig(cfg, "/unknown/path/myrepo")
+		if got != "myrepo" {
+			t.Errorf("repoNameFromConfig() = %q, want %q", got, "myrepo")
+		}
+	})
+}
+
 func TestAddWorktreeCmd_Success(t *testing.T) {
 	runner := git.FakeCommandRunner{
 		Outputs: map[string]string{
