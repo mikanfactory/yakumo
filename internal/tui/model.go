@@ -740,6 +740,22 @@ func renameBranchCmd(gen branchname.Generator, runner git.CommandRunner, tmuxRun
 			newBranch = parts[0] + "/" + sanitized
 		}
 
+		// Resolve the actual tmux session name before git rename (session may have been renamed)
+		var oldSessionName string
+		if tmuxRunner != nil {
+			var getBranch tmux.BranchGetter
+			if runner != nil {
+				getBranch = func(wtPath string) (string, error) {
+					out, err := runner.Run(wtPath, "symbolic-ref", "--short", "HEAD")
+					if err != nil {
+						return "", err
+					}
+					return strings.TrimSpace(out), nil
+				}
+			}
+			oldSessionName = tmux.ResolveSessionName(tmuxRunner, worktreePath, getBranch)
+		}
+
 		log.Printf("[branch-rename] renameBranch: renaming %q -> %q in %q", originalBranch, newBranch, worktreePath)
 		if err := git.RenameBranch(runner, worktreePath, originalBranch, newBranch); err != nil {
 			log.Printf("[branch-rename] renameBranch: RenameBranch error: %v", err)
@@ -749,8 +765,7 @@ func renameBranchCmd(gen branchname.Generator, runner git.CommandRunner, tmuxRun
 		log.Printf("[branch-rename] renameBranch: success %q -> %q", originalBranch, newBranch)
 
 		// Rename tmux session to match the new branch slug (non-fatal)
-		if tmuxRunner != nil {
-			oldSessionName := filepath.Base(worktreePath)
+		if tmuxRunner != nil && oldSessionName != "" {
 			newSessionName := branchname.SlugFromBranch(newBranch)
 			if newSessionName != oldSessionName {
 				if err := tmux.RenameSession(tmuxRunner, oldSessionName, newSessionName); err != nil {

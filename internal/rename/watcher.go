@@ -115,6 +115,22 @@ func (w *Watcher) renameBranch(prompt string) error {
 		newBranch = parts[0] + "/" + sanitized
 	}
 
+	// Resolve the actual tmux session name before git rename (session may have been renamed)
+	var oldSessionName string
+	if w.tmuxRunner != nil {
+		var getBranch tmux.BranchGetter
+		if w.runner != nil {
+			getBranch = func(wtPath string) (string, error) {
+				out, err := w.runner.Run(wtPath, "symbolic-ref", "--short", "HEAD")
+				if err != nil {
+					return "", err
+				}
+				return strings.TrimSpace(out), nil
+			}
+		}
+		oldSessionName = tmux.ResolveSessionName(w.tmuxRunner, w.config.WorktreePath, getBranch)
+	}
+
 	w.logf("renameBranch: renaming %q -> %q in %q", w.config.Branch, newBranch, w.config.WorktreePath)
 	if err := git.RenameBranch(w.runner, w.config.WorktreePath, w.config.Branch, newBranch); err != nil {
 		w.logf("renameBranch: RenameBranch error: %v", err)
@@ -124,13 +140,13 @@ func (w *Watcher) renameBranch(prompt string) error {
 	w.logf("renameBranch: success %q -> %q", w.config.Branch, newBranch)
 
 	// Rename tmux session to match the new branch slug (non-fatal)
-	if w.tmuxRunner != nil && w.config.SessionName != "" {
+	if w.tmuxRunner != nil && oldSessionName != "" {
 		newSessionName := branchname.SlugFromBranch(newBranch)
-		if newSessionName != w.config.SessionName {
-			if err := tmux.RenameSession(w.tmuxRunner, w.config.SessionName, newSessionName); err != nil {
+		if newSessionName != oldSessionName {
+			if err := tmux.RenameSession(w.tmuxRunner, oldSessionName, newSessionName); err != nil {
 				w.logf("renameBranch: tmux rename-session failed (non-fatal): %v", err)
 			} else {
-				w.logf("renameBranch: tmux session renamed %q -> %q", w.config.SessionName, newSessionName)
+				w.logf("renameBranch: tmux session renamed %q -> %q", oldSessionName, newSessionName)
 			}
 		}
 	}

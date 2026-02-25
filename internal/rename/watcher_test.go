@@ -344,6 +344,7 @@ func TestWatcher_Run_RenamesTmuxSession(t *testing.T) {
 	}
 	tmuxRunner := &tmux.FakeRunner{
 		Outputs: map[string]string{
+			"[has-session -t south-korea]":                  "",
 			"[rename-session -t south-korea add-jwt-auth]": "",
 		},
 	}
@@ -389,6 +390,9 @@ func TestWatcher_Run_TmuxRenameFailureNonFatal(t *testing.T) {
 		},
 	}
 	tmuxRunner := &tmux.FakeRunner{
+		Outputs: map[string]string{
+			"[has-session -t south-korea]": "",
+		},
 		Errors: map[string]error{
 			"[rename-session -t south-korea add-jwt-auth]": fmt.Errorf("tmux error"),
 		},
@@ -408,5 +412,109 @@ func TestWatcher_Run_TmuxRenameFailureNonFatal(t *testing.T) {
 	// Should still succeed even if tmux rename fails
 	if err != nil {
 		t.Fatalf("expected success (tmux error is non-fatal), got error: %v", err)
+	}
+}
+
+func TestWatcher_Run_RenamesTmuxSession_ResolvedBySlug(t *testing.T) {
+	wtPath := "/Users/shoji/shikon/south-korea"
+	createdAt := time.Now().UnixMilli()
+
+	historyData := makeHistory(wtPath, "add user authentication with JWT tokens", createdAt+1000)
+
+	reader := claude.FakeReader{Data: historyData}
+	gen := branchname.FakeGenerator{Result: "add-jwt-auth"}
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			fmt.Sprintf("%s:[branch -m mikanfactory/south-korea mikanfactory/add-jwt-auth]", wtPath): "",
+			// ResolveSessionName calls getBranch which calls symbolic-ref
+			fmt.Sprintf("%s:[symbolic-ref --short HEAD]", wtPath): "mikanfactory/south-korea\n",
+		},
+	}
+	tmuxRunner := &tmux.FakeRunner{
+		Outputs: map[string]string{
+			// filepath.Base("south-korea") session does NOT exist
+			// Branch slug "south-korea" session DOES exist (already renamed)
+			"[has-session -t south-korea]":                  "",
+			"[rename-session -t south-korea add-jwt-auth]": "",
+		},
+	}
+
+	cfg := WatcherConfig{
+		WorktreePath: wtPath,
+		Branch:       "mikanfactory/south-korea",
+		SessionName:  "south-korea",
+		CreatedAt:    createdAt,
+		PollInterval: 10 * time.Millisecond,
+		Timeout:      1 * time.Second,
+	}
+
+	w := NewWatcher(cfg, reader, gen, runner, tmuxRunner)
+	err := w.Run()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+
+	// Verify tmux rename-session was called with resolved name
+	found := false
+	for _, call := range tmuxRunner.Calls {
+		if len(call) >= 3 && call[0] == "rename-session" && call[2] == "south-korea" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected tmux rename-session to be called with resolved session name")
+	}
+}
+
+func TestWatcher_Run_RenamesTmuxSession_FallbackToSlug(t *testing.T) {
+	// Test case: directory-based session name doesn't exist,
+	// but branch slug session does (session was previously renamed to slug)
+	wtPath := "/Users/shoji/shikon/saint-pierre-and-miquelon"
+	createdAt := time.Now().UnixMilli()
+
+	historyData := makeHistory(wtPath, "fix the diff UI session error", createdAt+1000)
+
+	reader := claude.FakeReader{Data: historyData}
+	gen := branchname.FakeGenerator{Result: "fix-diffui-session-error"}
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			fmt.Sprintf("%s:[branch -m mikanfactory/saint-pierre-and-miquelon mikanfactory/fix-diffui-session-error]", wtPath): "",
+			// ResolveSessionName calls getBranch
+			fmt.Sprintf("%s:[symbolic-ref --short HEAD]", wtPath): "mikanfactory/saint-pierre-and-miquelon\n",
+		},
+	}
+	tmuxRunner := &tmux.FakeRunner{
+		Outputs: map[string]string{
+			// directory-based name exists
+			"[has-session -t saint-pierre-and-miquelon]":                           "",
+			"[rename-session -t saint-pierre-and-miquelon fix-diffui-session-error]": "",
+		},
+		Errors: map[string]error{},
+	}
+
+	cfg := WatcherConfig{
+		WorktreePath: wtPath,
+		Branch:       "mikanfactory/saint-pierre-and-miquelon",
+		SessionName:  "saint-pierre-and-miquelon",
+		CreatedAt:    createdAt,
+		PollInterval: 10 * time.Millisecond,
+		Timeout:      1 * time.Second,
+	}
+
+	w := NewWatcher(cfg, reader, gen, runner, tmuxRunner)
+	err := w.Run()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+
+	// Verify rename-session was called with the resolved name
+	found := false
+	for _, call := range tmuxRunner.Calls {
+		if len(call) >= 4 && call[0] == "rename-session" && call[2] == "saint-pierre-and-miquelon" && call[3] == "fix-diffui-session-error" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected rename-session with resolved name, calls: %v", tmuxRunner.Calls)
 	}
 }

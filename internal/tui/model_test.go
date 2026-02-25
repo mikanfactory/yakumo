@@ -1261,6 +1261,87 @@ func TestRenameBranchCmd_EmptyName(t *testing.T) {
 	}
 }
 
+func TestRenameBranchCmd_WithTmuxRunner_RenamesSession(t *testing.T) {
+	gen := branchname.FakeGenerator{Result: "fix-login-redirect"}
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			"/tmp/worktree:[branch -m shoji/south-korea shoji/fix-login-redirect]": "",
+		},
+	}
+	tmuxRunner := &tmux.FakeRunner{
+		Outputs: map[string]string{
+			"[has-session -t worktree]":                              "",
+			"[rename-session -t worktree fix-login-redirect]": "",
+		},
+	}
+
+	cmd := renameBranchCmd(gen, runner, tmuxRunner, "/tmp/worktree", "shoji/south-korea", "fix the login redirect bug")
+	msg := cmd()
+
+	resultMsg, ok := msg.(BranchRenameResultMsg)
+	if !ok {
+		t.Fatalf("expected BranchRenameResultMsg, got %T", msg)
+	}
+	if resultMsg.Err != nil {
+		t.Fatalf("unexpected error: %v", resultMsg.Err)
+	}
+	if resultMsg.NewBranch != "shoji/fix-login-redirect" {
+		t.Errorf("NewBranch = %q, want %q", resultMsg.NewBranch, "shoji/fix-login-redirect")
+	}
+
+	// Verify rename-session was called
+	found := false
+	for _, call := range tmuxRunner.Calls {
+		if len(call) >= 1 && call[0] == "rename-session" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected tmux rename-session to be called")
+	}
+}
+
+func TestRenameBranchCmd_WithTmuxRunner_ResolvesSlugSession(t *testing.T) {
+	// Session was previously renamed to branch slug, not directory basename
+	gen := branchname.FakeGenerator{Result: "fix-diffui-error"}
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			"/tmp/saint-pierre-and-miquelon:[branch -m mikanfactory/saint-pierre-and-miquelon mikanfactory/fix-diffui-error]": "",
+			// ResolveSessionName uses getBranch to get the current branch
+			"/tmp/saint-pierre-and-miquelon:[symbolic-ref --short HEAD]": "mikanfactory/saint-pierre-and-miquelon\n",
+		},
+	}
+	tmuxRunner := &tmux.FakeRunner{
+		Outputs: map[string]string{
+			// directory-based session exists
+			"[has-session -t saint-pierre-and-miquelon]":                  "",
+			"[rename-session -t saint-pierre-and-miquelon fix-diffui-error]": "",
+		},
+	}
+
+	cmd := renameBranchCmd(gen, runner, tmuxRunner, "/tmp/saint-pierre-and-miquelon", "mikanfactory/saint-pierre-and-miquelon", "fix the diff UI error")
+	msg := cmd()
+
+	resultMsg, ok := msg.(BranchRenameResultMsg)
+	if !ok {
+		t.Fatalf("expected BranchRenameResultMsg, got %T", msg)
+	}
+	if resultMsg.Err != nil {
+		t.Fatalf("unexpected error: %v", resultMsg.Err)
+	}
+
+	// Verify rename-session was called with the resolved slug name
+	found := false
+	for _, call := range tmuxRunner.Calls {
+		if len(call) >= 4 && call[0] == "rename-session" && call[2] == "saint-pierre-and-miquelon" && call[3] == "fix-diffui-error" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected rename-session with resolved slug name, calls: %v", tmuxRunner.Calls)
+	}
+}
+
 func TestRenameTimeout(t *testing.T) {
 	m := testModel()
 	m.branchRenames = map[string]model.BranchRenameInfo{
