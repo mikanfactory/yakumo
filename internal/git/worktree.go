@@ -89,7 +89,7 @@ func parseBlock(block string) worktreeEntry {
 
 // AddWorktree creates a new worktree with a new branch.
 func AddWorktree(runner CommandRunner, repoPath, newPath, branch string) error {
-	_, err := runner.Run(repoPath, "worktree", "add", newPath, "-b", branch)
+	_, err := runner.Run(repoPath, "worktree", "add", newPath, "-b", branch, defaultBase)
 	return err
 }
 

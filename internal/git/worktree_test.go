@@ -158,7 +158,7 @@ func TestToWorktreeInfo_IsBare(t *testing.T) {
 func TestAddWorktree(t *testing.T) {
 	runner := FakeCommandRunner{
 		Outputs: map[string]string{
-			"/repo:[worktree add /tmp/new-worktree -b user/feature]": "",
+			"/repo:[worktree add /tmp/new-worktree -b user/feature origin/main]": "",
 		},
 	}
 
