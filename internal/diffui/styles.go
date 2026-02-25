@@ -81,4 +81,7 @@ var (
 
 	selectedStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("236"))
+
+	statusMsgStyle = lipgloss.NewStyle().
+			Foreground(colorRed)
 )

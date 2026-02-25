@@ -251,25 +251,21 @@ func TestSendKeys_Error(t *testing.T) {
 func TestSelectPane_Success(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[select-pane -t %0]": "",
+			"[select-pane -t dev:main-window.0]": "",
 		},
 	}
 
-	err := SelectPane(runner, "%0")
+	err := SelectPane(runner, "dev:main-window.0")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(runner.Calls) != 1 {
 		t.Fatalf("expected 1 call, got %d", len(runner.Calls))
 	}
-	call := runner.Calls[0]
-	expected := []string{"select-pane", "-t", "%0"}
-	if len(call) != len(expected) {
-		t.Fatalf("call args length = %d, want %d", len(call), len(expected))
-	}
-	for i := range expected {
-		if call[i] != expected[i] {
-			t.Errorf("call[%d] = %q, want %q", i, call[i], expected[i])
+	expected := []string{"select-pane", "-t", "dev:main-window.0"}
+	for i, arg := range expected {
+		if runner.Calls[0][i] != arg {
+			t.Errorf("call[%d] = %q, want %q", i, runner.Calls[0][i], arg)
 		}
 	}
 }
@@ -277,11 +273,40 @@ func TestSelectPane_Success(t *testing.T) {
 func TestSelectPane_Error(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[select-pane -t %99]": fmt.Errorf("pane not found"),
+			"[select-pane -t bad-target]": fmt.Errorf("pane not found"),
 		},
 	}
 
-	err := SelectPane(runner, "%99")
+	err := SelectPane(runner, "bad-target")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestPaneCurrentCommand_Success(t *testing.T) {
+	runner := &FakeRunner{
+		Outputs: map[string]string{
+			"[display-message -p -t dev:main-window.0 #{pane_current_command}]": "zsh\n",
+		},
+	}
+
+	cmd, err := PaneCurrentCommand(runner, "dev:main-window.0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cmd != "zsh" {
+		t.Errorf("expected %q, got %q", "zsh", cmd)
+	}
+}
+
+func TestPaneCurrentCommand_Error(t *testing.T) {
+	runner := &FakeRunner{
+		Errors: map[string]error{
+			"[display-message -p -t bad-target #{pane_current_command}]": fmt.Errorf("pane not found"),
+		},
+	}
+
+	_, err := PaneCurrentCommand(runner, "bad-target")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

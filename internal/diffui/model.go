@@ -1,14 +1,17 @@
 package diffui
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mikanfactory/yakumo/internal/git"
 	"github.com/mikanfactory/yakumo/internal/github"
+	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
 // === Tab ===
@@ -61,6 +64,10 @@ type VimFinishedMsg struct {
 	Err error
 }
 
+type OpenVimResultMsg struct {
+	Err error
+}
+
 type TickMsg time.Time
 
 // === Sub-Models ===
@@ -95,23 +102,28 @@ type Model struct {
 	height    int
 	quitting  bool
 
-	repoDir   string
-	gitRunner git.CommandRunner
-	ghRunner  github.Runner
+	repoDir    string
+	gitRunner  git.CommandRunner
+	ghRunner   github.Runner
+	tmuxRunner tmux.Runner // nil when not inside tmux
+
+	statusMsg string
 
 	changes ChangesModel
 	checks  ChecksModel
 }
 
 // NewModel creates a new diff UI model.
-func NewModel(repoDir string, gitRunner git.CommandRunner, ghRunner github.Runner) Model {
+// tmuxRunner may be nil when running outside tmux (vim opens in the current pane).
+func NewModel(repoDir string, gitRunner git.CommandRunner, ghRunner github.Runner, tmuxRunner tmux.Runner) Model {
 	return Model{
-		activeTab: TabChanges,
-		width:     80,
-		height:    24,
-		repoDir:   repoDir,
-		gitRunner: gitRunner,
-		ghRunner:  ghRunner,
+		activeTab:  TabChanges,
+		width:      80,
+		height:     24,
+		repoDir:    repoDir,
+		gitRunner:  gitRunner,
+		ghRunner:   ghRunner,
+		tmuxRunner: tmuxRunner,
 		changes: ChangesModel{
 			loading: true,
 		},
@@ -165,6 +177,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fetchChecksCmd(m.ghRunner, m.gitRunner, m.repoDir),
 		)
 
+	case OpenVimResultMsg:
+		if msg.Err != nil {
+			m.statusMsg = msg.Err.Error()
+		}
+		return m, nil
+
 	case TickMsg:
 		return m, tea.Batch(
 			fetchChangesCmd(m.gitRunner, m.repoDir),
@@ -173,6 +191,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case tea.KeyMsg:
+		m.statusMsg = ""
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.quitting = true
@@ -204,6 +224,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == TabChanges && len(m.changes.files) > 0 {
 				file := m.changes.files[m.changes.cursor]
 				fullPath := filepath.Join(m.repoDir, file.Path)
+
+				if m.tmuxRunner != nil {
+					return m, openVimInIdleCenterPaneCmd(m.tmuxRunner, fullPath)
+				}
+
+				// Fallback: open vim in the current pane (non-tmux environment)
 				c := exec.Command("vim", fullPath)
 				return m, tea.ExecProcess(c, func(err error) tea.Msg {
 					return VimFinishedMsg{Err: err}
@@ -261,6 +287,76 @@ func (m ChecksModel) update(msg tea.KeyMsg) ChecksModel {
 		m.scrollOff = 999
 	}
 	return m
+}
+
+// === Vim in Center Pane ===
+
+// centerPaneTargets returns the tmux targets for all center panes relative to a session.
+func centerPaneTargets(session string) []string {
+	return []string{
+		session + ":main-window.0",
+		session + ":background-window.0",
+		session + ":background-window.1",
+	}
+}
+
+// isShellCommand returns true if the command name indicates an idle shell prompt.
+func isShellCommand(cmd string) bool {
+	cmd = strings.TrimSpace(cmd)
+	cmd = strings.TrimPrefix(cmd, "-") // login shell prefix (e.g., "-zsh")
+	cmd = strings.ToLower(cmd)
+	switch cmd {
+	case "zsh", "bash", "fish", "sh", "dash", "ksh":
+		return true
+	}
+	return false
+}
+
+// openVimInIdleCenterPaneCmd finds an idle center pane, sends vim there,
+// swaps it to main-window if needed, and focuses it.
+func openVimInIdleCenterPaneCmd(runner tmux.Runner, filePath string) tea.Cmd {
+	return func() tea.Msg {
+		session, err := tmux.CurrentSessionName(runner)
+		if err != nil {
+			return OpenVimResultMsg{Err: fmt.Errorf("セッション名の取得に失敗: %w", err)}
+		}
+
+		targets := centerPaneTargets(session)
+		mainCenter := targets[0]
+
+		idleTarget := ""
+		for _, target := range targets {
+			cmd, err := tmux.PaneCurrentCommand(runner, target)
+			if err != nil {
+				continue
+			}
+			if isShellCommand(cmd) {
+				idleTarget = target
+				break
+			}
+		}
+
+		if idleTarget == "" {
+			return OpenVimResultMsg{Err: fmt.Errorf("利用可能なcenter paneがありません")}
+		}
+
+		if err := tmux.SendKeys(runner, idleTarget, "vim "+filePath); err != nil {
+			return OpenVimResultMsg{Err: fmt.Errorf("vimの起動に失敗: %w", err)}
+		}
+
+		// Swap the idle pane to main-window center if it's in the background
+		if idleTarget != mainCenter {
+			if _, err := runner.Run("swap-pane", "-d", "-s", idleTarget, "-t", mainCenter); err != nil {
+				return OpenVimResultMsg{Err: fmt.Errorf("paneの入れ替えに失敗: %w", err)}
+			}
+		}
+
+		if err := tmux.SelectPane(runner, mainCenter); err != nil {
+			return OpenVimResultMsg{Err: fmt.Errorf("paneのフォーカスに失敗: %w", err)}
+		}
+
+		return OpenVimResultMsg{}
+	}
 }
 
 // === Data Fetching Commands ===

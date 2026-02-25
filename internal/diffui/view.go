@@ -25,9 +25,14 @@ func (m Model) View() string {
 		content = m.checks.view(m.width, viewportHeight)
 	}
 
+	var statusLine string
+	if m.statusMsg != "" {
+		statusLine = statusMsgStyle.Render("  " + m.statusMsg)
+	}
+
 	help := helpStyle.Render("  tab: switch pane  j/k: navigate  enter: open in vim  q: quit")
 
-	return lipgloss.JoinVertical(lipgloss.Left, tabBar, content, help)
+	return lipgloss.JoinVertical(lipgloss.Left, tabBar, content, statusLine, help)
 }
 
 // === Tab Bar ===
