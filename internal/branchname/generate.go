@@ -85,6 +85,16 @@ func (g FakeGenerator) GenerateBranchName(_ string) (string, error) {
 	return g.Result, g.Err
 }
 
+// SlugFromBranch extracts the slug portion from a branch name.
+// "shoji/fix-login-redirect" → "fix-login-redirect"
+// "fix-login-redirect" → "fix-login-redirect"
+func SlugFromBranch(branch string) string {
+	if parts := strings.SplitN(branch, "/", 2); len(parts) == 2 {
+		return parts[1]
+	}
+	return branch
+}
+
 // SanitizeBranchName ensures the name is kebab-case, lowercase, and within the max length.
 func SanitizeBranchName(name string) string {
 	result := git.Slugify(name)

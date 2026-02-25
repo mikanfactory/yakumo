@@ -167,8 +167,16 @@ func runWorktreeUI(configPath string) {
 
 	if tmux.IsInsideTmux() {
 		tmuxRunner := tmux.OSRunner{}
+		gitRunner := git.OSCommandRunner{}
+		getBranch := tmux.BranchGetter(func(worktreePath string) (string, error) {
+			out, err := gitRunner.Run(worktreePath, "symbolic-ref", "--short", "HEAD")
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(out), nil
+		})
 		repo := findRepoByPath(cfg, finalModel.SelectedRepoPath())
-		layout, err := tmux.SelectWorktreeSession(tmuxRunner, selected, repo.StartupCommand)
+		layout, err := tmux.SelectWorktreeSession(tmuxRunner, selected, repo.StartupCommand, getBranch)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tmux error: %v\n", err)
 			os.Exit(1)
@@ -208,15 +216,14 @@ func runWorktreeUI(configPath string) {
 			if layout.BottomRight2.PaneID != "" {
 				targetPane = layout.BottomRight2.PaneID
 			} else {
-				sessionName := filepath.Base(selected)
-				paneID, err := findIdleBackgroundPane(tmuxRunner, sessionName)
+				paneID, err := findIdleBackgroundPane(tmuxRunner, layout.SessionName)
 				if err == nil {
 					targetPane = paneID
 				}
 			}
 			if targetPane != "" {
 				if err := launchRenameWatcher(tmuxRunner, targetPane,
-					selected, renameInfo.OriginalBranch, renameInfo.CreatedAt); err != nil {
+					selected, renameInfo.OriginalBranch, layout.SessionName, renameInfo.CreatedAt); err != nil {
 					log.Printf("[branch-rename] watcher launch failed: %v", err)
 				}
 			}
@@ -267,6 +274,7 @@ func runWatchRename() {
 	wtPath := fs.String("path", "", "absolute path to the worktree")
 	branch := fs.String("branch", "", "original branch name")
 	createdAtStr := fs.String("created-at", "", "unix millisecond timestamp")
+	sessionName := fs.String("session-name", "", "tmux session name to rename")
 	fs.Parse(os.Args[2:])
 
 	if *wtPath == "" || *branch == "" || *createdAtStr == "" {
@@ -296,9 +304,15 @@ func runWatchRename() {
 	gen := branchname.CLIGenerator{ClaudePath: claudePath}
 	runner := git.OSCommandRunner{}
 
+	var tmuxRunner tmux.Runner
+	if tmux.IsInsideTmux() {
+		tmuxRunner = tmux.OSRunner{}
+	}
+
 	cfg := rename.WatcherConfig{
 		WorktreePath: *wtPath,
 		Branch:       *branch,
+		SessionName:  *sessionName,
 		CreatedAt:    createdAt,
 		PollInterval: 2 * time.Second,
 		Timeout:      10 * time.Minute,
@@ -307,7 +321,7 @@ func runWatchRename() {
 	// Create logger that writes to both stdout (visible in tmux pane) and debug.log
 	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lmicroseconds)
 
-	w := rename.NewWatcher(cfg, reader, gen, runner)
+	w := rename.NewWatcher(cfg, reader, gen, runner, tmuxRunner)
 	w.SetLogger(logger)
 	if err := w.Run(); err != nil {
 		logger.Printf("[branch-rename] watcher exited with error: %v", err)
@@ -317,17 +331,18 @@ func runWatchRename() {
 }
 
 // launchRenameWatcher sends the watch-rename command to a tmux pane via SendKeys.
-func launchRenameWatcher(runner tmux.Runner, paneID, worktreePath, branch string, createdAt int64) error {
+func launchRenameWatcher(runner tmux.Runner, paneID, worktreePath, branch, sessionName string, createdAt int64) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolving executable: %w", err)
 	}
 
-	cmd := fmt.Sprintf("%s watch-rename --path %s --branch %s --created-at %s",
+	cmd := fmt.Sprintf("%s watch-rename --path %s --branch %s --created-at %s --session-name %s",
 		shellEscape(exe),
 		shellEscape(worktreePath),
 		shellEscape(branch),
 		strconv.FormatInt(createdAt, 10),
+		shellEscape(sessionName),
 	)
 
 	return tmux.SendKeys(runner, paneID, cmd)

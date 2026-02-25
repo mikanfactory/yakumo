@@ -9,12 +9,14 @@ import (
 	"github.com/mikanfactory/yakumo/internal/branchname"
 	"github.com/mikanfactory/yakumo/internal/claude"
 	"github.com/mikanfactory/yakumo/internal/git"
+	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
 // WatcherConfig holds the parameters for a rename watcher.
 type WatcherConfig struct {
 	WorktreePath string
 	Branch       string
+	SessionName  string
 	CreatedAt    int64
 	PollInterval time.Duration
 	Timeout      time.Duration
@@ -26,16 +28,18 @@ type Watcher struct {
 	reader    claude.Reader
 	generator branchname.Generator
 	runner    git.CommandRunner
+	tmuxRunner tmux.Runner
 	logger    *log.Logger
 }
 
 // NewWatcher creates a new rename watcher.
-func NewWatcher(cfg WatcherConfig, reader claude.Reader, gen branchname.Generator, runner git.CommandRunner) *Watcher {
+func NewWatcher(cfg WatcherConfig, reader claude.Reader, gen branchname.Generator, runner git.CommandRunner, tmuxRunner tmux.Runner) *Watcher {
 	return &Watcher{
-		config:    cfg,
-		reader:    reader,
-		generator: gen,
-		runner:    runner,
+		config:     cfg,
+		reader:     reader,
+		generator:  gen,
+		runner:     runner,
+		tmuxRunner: tmuxRunner,
 	}
 }
 
@@ -118,5 +122,18 @@ func (w *Watcher) renameBranch(prompt string) error {
 	}
 
 	w.logf("renameBranch: success %q -> %q", w.config.Branch, newBranch)
+
+	// Rename tmux session to match the new branch slug (non-fatal)
+	if w.tmuxRunner != nil && w.config.SessionName != "" {
+		newSessionName := branchname.SlugFromBranch(newBranch)
+		if newSessionName != w.config.SessionName {
+			if err := tmux.RenameSession(w.tmuxRunner, w.config.SessionName, newSessionName); err != nil {
+				w.logf("renameBranch: tmux rename-session failed (non-fatal): %v", err)
+			} else {
+				w.logf("renameBranch: tmux session renamed %q -> %q", w.config.SessionName, newSessionName)
+			}
+		}
+	}
+
 	return nil
 }

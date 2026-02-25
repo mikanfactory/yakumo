@@ -89,6 +89,40 @@ func KillSession(runner Runner, sessionName string) error {
 	return err
 }
 
+// RenameSession renames a tmux session.
+func RenameSession(runner Runner, oldName, newName string) error {
+	_, err := runner.Run("rename-session", "-t", oldName, newName)
+	return err
+}
+
+// BranchGetter returns the current git branch for a worktree path.
+type BranchGetter func(worktreePath string) (string, error)
+
+// ResolveSessionName determines the tmux session name for a worktree.
+// It first checks for a session matching filepath.Base(worktreePath),
+// then checks for a session matching the branch slug (e.g. "fix-login" from "shoji/fix-login").
+func ResolveSessionName(runner Runner, worktreePath string, getBranch BranchGetter) string {
+	defaultName := filepath.Base(worktreePath)
+	if exists, _ := HasSession(runner, defaultName); exists {
+		return defaultName
+	}
+	if getBranch == nil {
+		return defaultName
+	}
+	branch, err := getBranch(worktreePath)
+	if err != nil || branch == "" {
+		return defaultName
+	}
+	slug := branch
+	if parts := strings.SplitN(branch, "/", 2); len(parts) == 2 {
+		slug = parts[1]
+	}
+	if exists, _ := HasSession(runner, slug); exists {
+		return slug
+	}
+	return defaultName
+}
+
 // SwitchToSession switches the client to an existing session and selects the main-window.
 func SwitchToSession(runner Runner, sessionName string) error {
 	if _, err := runner.Run("switch-client", "-t", sessionName); err != nil {
@@ -194,8 +228,9 @@ func CreateSessionLayout(runner Runner, sessionName string, startDir string, sta
 // If the session already exists, it switches to it.
 // If not, it creates the full layout and switches to the new session.
 // startupCommand is sent to the initial pane before splitting (only for new sessions).
-func SelectWorktreeSession(runner Runner, worktreePath string, startupCommand string) (SessionLayout, error) {
-	sessionName := filepath.Base(worktreePath)
+// getBranch is optional; when provided, it is used to resolve renamed sessions.
+func SelectWorktreeSession(runner Runner, worktreePath string, startupCommand string, getBranch BranchGetter) (SessionLayout, error) {
+	sessionName := ResolveSessionName(runner, worktreePath, getBranch)
 
 	exists, _ := HasSession(runner, sessionName)
 
@@ -206,12 +241,14 @@ func SelectWorktreeSession(runner Runner, worktreePath string, startupCommand st
 		return SessionLayout{SessionName: sessionName}, nil
 	}
 
-	layout, err := CreateSessionLayout(runner, sessionName, worktreePath, startupCommand)
+	// For new sessions, use the default name (filepath.Base)
+	newSessionName := filepath.Base(worktreePath)
+	layout, err := CreateSessionLayout(runner, newSessionName, worktreePath, startupCommand)
 	if err != nil {
 		return SessionLayout{}, fmt.Errorf("creating session layout: %w", err)
 	}
 
-	if err := SwitchToSession(runner, sessionName); err != nil {
+	if err := SwitchToSession(runner, newSessionName); err != nil {
 		return layout, fmt.Errorf("switching to new session: %w", err)
 	}
 

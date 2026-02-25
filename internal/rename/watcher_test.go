@@ -12,6 +12,7 @@ import (
 	"github.com/mikanfactory/yakumo/internal/branchname"
 	"github.com/mikanfactory/yakumo/internal/claude"
 	"github.com/mikanfactory/yakumo/internal/git"
+	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
 func makeHistory(project, display string, timestamp int64) []byte {
@@ -47,7 +48,7 @@ func TestWatcher_Run_Success(t *testing.T) {
 		Timeout:      1 * time.Second,
 	}
 
-	w := NewWatcher(cfg, reader, gen, runner)
+	w := NewWatcher(cfg, reader, gen, runner, nil)
 	err := w.Run()
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
@@ -67,7 +68,7 @@ func TestWatcher_Run_Timeout(t *testing.T) {
 		Timeout:      50 * time.Millisecond,
 	}
 
-	w := NewWatcher(cfg, reader, gen, runner)
+	w := NewWatcher(cfg, reader, gen, runner, nil)
 	err := w.Run()
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
@@ -95,7 +96,7 @@ func TestWatcher_Run_LLMError(t *testing.T) {
 		Timeout:      1 * time.Second,
 	}
 
-	w := NewWatcher(cfg, reader, gen, runner)
+	w := NewWatcher(cfg, reader, gen, runner, nil)
 	err := w.Run()
 	if err == nil {
 		t.Fatal("expected LLM error, got nil")
@@ -127,7 +128,7 @@ func TestWatcher_Run_RenameError(t *testing.T) {
 		Timeout:      1 * time.Second,
 	}
 
-	w := NewWatcher(cfg, reader, gen, runner)
+	w := NewWatcher(cfg, reader, gen, runner, nil)
 	err := w.Run()
 	if err == nil {
 		t.Fatal("expected rename error, got nil")
@@ -160,7 +161,7 @@ func TestWatcher_Run_PreservesPrefix(t *testing.T) {
 		Timeout:      1 * time.Second,
 	}
 
-	w := NewWatcher(cfg, reader, gen, runner)
+	w := NewWatcher(cfg, reader, gen, runner, nil)
 	err := w.Run()
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
@@ -190,7 +191,7 @@ func TestWatcher_Run_NoPrefixBranch(t *testing.T) {
 		Timeout:      1 * time.Second,
 	}
 
-	w := NewWatcher(cfg, reader, gen, runner)
+	w := NewWatcher(cfg, reader, gen, runner, nil)
 	err := w.Run()
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
@@ -215,7 +216,7 @@ func TestWatcher_Run_EmptyBranchName(t *testing.T) {
 		Timeout:      1 * time.Second,
 	}
 
-	w := NewWatcher(cfg, reader, gen, runner)
+	w := NewWatcher(cfg, reader, gen, runner, nil)
 	err := w.Run()
 	if err == nil {
 		t.Fatal("expected error for empty branch name, got nil")
@@ -250,7 +251,7 @@ func TestWatcher_Run_LogsProgress(t *testing.T) {
 	var buf bytes.Buffer
 	logger := log.New(&buf, "", 0)
 
-	w := NewWatcher(cfg, reader, gen, runner)
+	w := NewWatcher(cfg, reader, gen, runner, nil)
 	w.SetLogger(logger)
 	err := w.Run()
 	if err != nil {
@@ -289,7 +290,7 @@ func TestWatcher_FindPrompt_LogsErrors(t *testing.T) {
 	var buf bytes.Buffer
 	logger := log.New(&buf, "", 0)
 
-	w := NewWatcher(cfg, reader, gen, runner)
+	w := NewWatcher(cfg, reader, gen, runner, nil)
 	w.SetLogger(logger)
 	_ = w.Run() // will timeout
 
@@ -318,12 +319,94 @@ func TestWatcher_Run_SkipsShortPrompts(t *testing.T) {
 		Timeout:      50 * time.Millisecond,
 	}
 
-	w := NewWatcher(cfg, reader, gen, runner)
+	w := NewWatcher(cfg, reader, gen, runner, nil)
 	err := w.Run()
 	if err == nil {
 		t.Fatal("expected timeout, got nil")
 	}
 	if !strings.Contains(err.Error(), "timeout") {
 		t.Errorf("error should contain 'timeout', got: %v", err)
+	}
+}
+
+func TestWatcher_Run_RenamesTmuxSession(t *testing.T) {
+	wtPath := "/Users/shoji/shikon/south-korea"
+	createdAt := time.Now().UnixMilli()
+
+	historyData := makeHistory(wtPath, "add user authentication with JWT tokens", createdAt+1000)
+
+	reader := claude.FakeReader{Data: historyData}
+	gen := branchname.FakeGenerator{Result: "add-jwt-auth"}
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			fmt.Sprintf("%s:[branch -m shoji/south-korea shoji/add-jwt-auth]", wtPath): "",
+		},
+	}
+	tmuxRunner := &tmux.FakeRunner{
+		Outputs: map[string]string{
+			"[rename-session -t south-korea add-jwt-auth]": "",
+		},
+	}
+
+	cfg := WatcherConfig{
+		WorktreePath: wtPath,
+		Branch:       "shoji/south-korea",
+		SessionName:  "south-korea",
+		CreatedAt:    createdAt,
+		PollInterval: 10 * time.Millisecond,
+		Timeout:      1 * time.Second,
+	}
+
+	w := NewWatcher(cfg, reader, gen, runner, tmuxRunner)
+	err := w.Run()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+
+	// Verify tmux rename-session was called
+	found := false
+	for _, call := range tmuxRunner.Calls {
+		if len(call) >= 1 && call[0] == "rename-session" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected tmux rename-session to be called")
+	}
+}
+
+func TestWatcher_Run_TmuxRenameFailureNonFatal(t *testing.T) {
+	wtPath := "/Users/shoji/shikon/south-korea"
+	createdAt := time.Now().UnixMilli()
+
+	historyData := makeHistory(wtPath, "add user authentication with JWT tokens", createdAt+1000)
+
+	reader := claude.FakeReader{Data: historyData}
+	gen := branchname.FakeGenerator{Result: "add-jwt-auth"}
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			fmt.Sprintf("%s:[branch -m shoji/south-korea shoji/add-jwt-auth]", wtPath): "",
+		},
+	}
+	tmuxRunner := &tmux.FakeRunner{
+		Errors: map[string]error{
+			"[rename-session -t south-korea add-jwt-auth]": fmt.Errorf("tmux error"),
+		},
+	}
+
+	cfg := WatcherConfig{
+		WorktreePath: wtPath,
+		Branch:       "shoji/south-korea",
+		SessionName:  "south-korea",
+		CreatedAt:    createdAt,
+		PollInterval: 10 * time.Millisecond,
+		Timeout:      1 * time.Second,
+	}
+
+	w := NewWatcher(cfg, reader, gen, runner, tmuxRunner)
+	err := w.Run()
+	// Should still succeed even if tmux rename fails
+	if err != nil {
+		t.Fatalf("expected success (tmux error is non-fatal), got error: %v", err)
 	}
 }

@@ -910,7 +910,7 @@ func TestUpdate_AgentStatusMsg(t *testing.T) {
 	m := testModel()
 
 	statuses := map[string][]model.AgentInfo{
-		"repo1": {
+		"/code/repo1": {
 			{PaneID: "%0", State: model.AgentStateRunning, Elapsed: "2m"},
 		},
 	}
@@ -972,18 +972,18 @@ func TestFetchAgentStatusCmd(t *testing.T) {
 		},
 	}
 
-	cmd := fetchAgentStatusCmd(runner, groups)
+	cmd := fetchAgentStatusCmd(runner, nil, groups)
 	msg := cmd()
 
 	statusMsg, ok := msg.(AgentStatusMsg)
 	if !ok {
 		t.Fatalf("expected AgentStatusMsg, got %T", msg)
 	}
-	if len(statusMsg.Statuses["repo1"]) != 1 {
-		t.Errorf("expected 1 agent for repo1, got %d", len(statusMsg.Statuses["repo1"]))
+	if len(statusMsg.Statuses["/code/repo1"]) != 1 {
+		t.Errorf("expected 1 agent for /code/repo1, got %d", len(statusMsg.Statuses["/code/repo1"]))
 	}
-	if len(statusMsg.Statuses["repo1-feat"]) != 0 {
-		t.Errorf("expected 0 agents for repo1-feat, got %d", len(statusMsg.Statuses["repo1-feat"]))
+	if len(statusMsg.Statuses["/code/repo1-feat"]) != 0 {
+		t.Errorf("expected 0 agents for /code/repo1-feat, got %d", len(statusMsg.Statuses["/code/repo1-feat"]))
 	}
 }
 
@@ -1214,7 +1214,7 @@ func TestRenameBranchCmd_Success(t *testing.T) {
 		},
 	}
 
-	cmd := renameBranchCmd(gen, runner, "/tmp/worktree", "shoji/south-korea", "fix the login redirect bug")
+	cmd := renameBranchCmd(gen, runner, nil, "/tmp/worktree", "shoji/south-korea", "fix the login redirect bug")
 	msg := cmd()
 
 	resultMsg, ok := msg.(BranchRenameResultMsg)
@@ -1233,7 +1233,7 @@ func TestRenameBranchCmd_LLMError(t *testing.T) {
 	gen := branchname.FakeGenerator{Err: fmt.Errorf("api timeout")}
 	runner := git.FakeCommandRunner{}
 
-	cmd := renameBranchCmd(gen, runner, "/tmp/worktree", "shoji/south-korea", "some prompt")
+	cmd := renameBranchCmd(gen, runner, nil, "/tmp/worktree", "shoji/south-korea", "some prompt")
 	msg := cmd()
 
 	resultMsg, ok := msg.(BranchRenameResultMsg)
@@ -1249,7 +1249,7 @@ func TestRenameBranchCmd_EmptyName(t *testing.T) {
 	gen := branchname.FakeGenerator{Result: ""}
 	runner := git.FakeCommandRunner{}
 
-	cmd := renameBranchCmd(gen, runner, "/tmp/worktree", "shoji/south-korea", "some prompt")
+	cmd := renameBranchCmd(gen, runner, nil, "/tmp/worktree", "shoji/south-korea", "some prompt")
 	msg := cmd()
 
 	resultMsg, ok := msg.(BranchRenameResultMsg)

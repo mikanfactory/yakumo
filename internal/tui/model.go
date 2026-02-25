@@ -218,7 +218,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AgentTickMsg:
 		if len(m.groups) > 0 && m.tmuxRunner != nil {
-			return m, fetchAgentStatusCmd(m.tmuxRunner, m.groups)
+			return m, fetchAgentStatusCmd(m.tmuxRunner, m.runner, m.groups)
 		}
 		return m, agentTickCmd()
 
@@ -226,8 +226,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentStatus = msg.Statuses
 		for i := range m.items {
 			if m.items[i].Kind == model.ItemKindWorktree {
-				sessionName := filepath.Base(m.items[i].WorktreePath)
-				m.items[i].AgentStatus = m.agentStatus[sessionName]
+				m.items[i].AgentStatus = m.agentStatus[m.items[i].WorktreePath]
 			}
 		}
 
@@ -277,7 +276,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			info.FirstPrompt = msg.Prompt
 			info.SessionID = msg.SessionID
 			m.branchRenames[msg.WorktreePath] = info
-			return m, renameBranchCmd(m.branchNameGen, m.runner, msg.WorktreePath, info.OriginalBranch, msg.Prompt)
+			return m, renameBranchCmd(m.branchNameGen, m.runner, m.tmuxRunner, msg.WorktreePath, info.OriginalBranch, msg.Prompt)
 		}
 		return m, nil
 
@@ -583,8 +582,18 @@ func (m Model) updateConfirmArchiveMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 func archiveWorktreeCmd(runner git.CommandRunner, tmuxRunner tmux.Runner, repoRootPath, worktreePath string) tea.Cmd {
 	return func() tea.Msg {
 		// Kill tmux session first (processes inside worktree would block git worktree remove)
-		sessionName := filepath.Base(worktreePath)
 		if tmuxRunner != nil {
+			var getBranch tmux.BranchGetter
+			if runner != nil {
+				getBranch = func(wtPath string) (string, error) {
+					out, err := runner.Run(wtPath, "symbolic-ref", "--short", "HEAD")
+					if err != nil {
+						return "", err
+					}
+					return strings.TrimSpace(out), nil
+				}
+			}
+			sessionName := tmux.ResolveSessionName(tmuxRunner, worktreePath, getBranch)
 			tmux.KillSession(tmuxRunner, sessionName) // ignore error (session may not exist)
 		}
 
@@ -710,7 +719,7 @@ func checkPromptCmd(reader claude.Reader, worktreePath string, createdAt int64) 
 	}
 }
 
-func renameBranchCmd(gen branchname.Generator, runner git.CommandRunner, worktreePath, originalBranch, prompt string) tea.Cmd {
+func renameBranchCmd(gen branchname.Generator, runner git.CommandRunner, tmuxRunner tmux.Runner, worktreePath, originalBranch, prompt string) tea.Cmd {
 	return func() tea.Msg {
 		log.Printf("[branch-rename] renameBranch: generating name for prompt=%q", prompt)
 		name, err := gen.GenerateBranchName(prompt)
@@ -738,6 +747,20 @@ func renameBranchCmd(gen branchname.Generator, runner git.CommandRunner, worktre
 		}
 
 		log.Printf("[branch-rename] renameBranch: success %q -> %q", originalBranch, newBranch)
+
+		// Rename tmux session to match the new branch slug (non-fatal)
+		if tmuxRunner != nil {
+			oldSessionName := filepath.Base(worktreePath)
+			newSessionName := branchname.SlugFromBranch(newBranch)
+			if newSessionName != oldSessionName {
+				if err := tmux.RenameSession(tmuxRunner, oldSessionName, newSessionName); err != nil {
+					log.Printf("[branch-rename] renameBranch: tmux rename-session failed (non-fatal): %v", err)
+				} else {
+					log.Printf("[branch-rename] renameBranch: tmux session renamed %q -> %q", oldSessionName, newSessionName)
+				}
+			}
+		}
+
 		return BranchRenameResultMsg{WorktreePath: worktreePath, NewBranch: newBranch}
 	}
 }
@@ -789,18 +812,29 @@ func agentTickCmd() tea.Cmd {
 	})
 }
 
-func fetchAgentStatusCmd(tmuxRunner tmux.Runner, groups []model.RepoGroup) tea.Cmd {
+func fetchAgentStatusCmd(tmuxRunner tmux.Runner, gitRunner git.CommandRunner, groups []model.RepoGroup) tea.Cmd {
 	return func() tea.Msg {
+		var getBranch tmux.BranchGetter
+		if gitRunner != nil {
+			getBranch = func(worktreePath string) (string, error) {
+				out, err := gitRunner.Run(worktreePath, "symbolic-ref", "--short", "HEAD")
+				if err != nil {
+					return "", err
+				}
+				return strings.TrimSpace(out), nil
+			}
+		}
+
 		statuses := make(map[string][]model.AgentInfo)
 		for _, group := range groups {
 			for _, wt := range group.Worktrees {
-				sessionName := filepath.Base(wt.Path)
+				sessionName := tmux.ResolveSessionName(tmuxRunner, wt.Path, getBranch)
 				agents, err := agent.DetectSessionAgents(tmuxRunner, sessionName)
 				if err != nil {
 					continue
 				}
 				if len(agents) > 0 {
-					statuses[sessionName] = agents
+					statuses[wt.Path] = agents
 				}
 			}
 		}
