@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,7 +87,22 @@ func runDiffUI() {
 	}
 }
 
+func setupDebugLog() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	logPath := filepath.Join(home, ".config", "yakumo", "debug.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	log.SetOutput(f)
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+}
+
 func runWorktreeUI(configPath string) {
+	setupDebugLog()
 	zone.NewGlobal()
 
 	cfg, err := config.Load(configPath)

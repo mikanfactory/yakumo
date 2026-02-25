@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -234,10 +235,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				continue
 			}
 			if now-info.CreatedAt > renameTimeoutMs {
+				log.Printf("[branch-rename] timeout: path=%q elapsed=%dms", path, now-info.CreatedAt)
 				info.Status = model.RenameStatusSkipped
 				m.branchRenames[path] = info
 				continue
 			}
+			log.Printf("[branch-rename] polling: path=%q elapsed=%dms", path, now-info.CreatedAt)
 			cmds = append(cmds, checkPromptCmd(m.claudeReader, path, info.CreatedAt))
 		}
 
@@ -251,12 +254,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case WorktreeAddedMsg:
 		m.loading = true
 		if m.branchRenames != nil && msg.WorktreePath != "" {
+			log.Printf("[branch-rename] WorktreeAdded: path=%q branch=%q createdAt=%d", msg.WorktreePath, msg.Branch, msg.CreatedAt)
 			m.branchRenames[msg.WorktreePath] = model.BranchRenameInfo{
 				Status:         model.RenameStatusPending,
 				OriginalBranch: msg.Branch,
 				WorktreePath:   msg.WorktreePath,
 				CreatedAt:      msg.CreatedAt,
 			}
+		} else if m.branchRenames == nil {
+			log.Printf("[branch-rename] WorktreeAdded: feature disabled (branchRenames=nil)")
 		}
 		return m, fetchGitDataCmd(m.config, m.runner)
 
@@ -677,16 +683,20 @@ func checkPromptCmd(reader claude.Reader, worktreePath string, createdAt int64) 
 	return func() tea.Msg {
 		data, err := reader.ReadHistoryFile()
 		if err != nil {
+			log.Printf("[branch-rename] checkPrompt: ReadHistoryFile error: %v", err)
 			return nil
 		}
 		entries, err := claude.ParseHistory(data)
 		if err != nil {
+			log.Printf("[branch-rename] checkPrompt: ParseHistory error: %v", err)
 			return nil
 		}
 		prompt, sessionID, found := claude.FindFirstPrompt(entries, worktreePath, createdAt)
 		if !found {
+			log.Printf("[branch-rename] checkPrompt: no prompt found for path=%q afterTimestamp=%d (entries=%d)", worktreePath, createdAt, len(entries))
 			return nil
 		}
+		log.Printf("[branch-rename] checkPrompt: found prompt=%q sessionID=%q for path=%q", prompt, sessionID, worktreePath)
 		return BranchRenameStartMsg{
 			WorktreePath: worktreePath,
 			Prompt:       prompt,
@@ -697,13 +707,16 @@ func checkPromptCmd(reader claude.Reader, worktreePath string, createdAt int64) 
 
 func renameBranchCmd(gen branchname.Generator, runner git.CommandRunner, worktreePath, originalBranch, prompt string) tea.Cmd {
 	return func() tea.Msg {
+		log.Printf("[branch-rename] renameBranch: generating name for prompt=%q", prompt)
 		name, err := gen.GenerateBranchName(prompt)
 		if err != nil {
+			log.Printf("[branch-rename] renameBranch: GenerateBranchName error: %v", err)
 			return BranchRenameResultMsg{WorktreePath: worktreePath, Err: err}
 		}
 
 		sanitized := branchname.SanitizeBranchName(name)
 		if sanitized == "" {
+			log.Printf("[branch-rename] renameBranch: SanitizeBranchName returned empty for raw=%q", name)
 			return BranchRenameResultMsg{WorktreePath: worktreePath, Err: fmt.Errorf("generated branch name is empty")}
 		}
 
@@ -713,10 +726,13 @@ func renameBranchCmd(gen branchname.Generator, runner git.CommandRunner, worktre
 			newBranch = parts[0] + "/" + sanitized
 		}
 
+		log.Printf("[branch-rename] renameBranch: renaming %q -> %q in %q", originalBranch, newBranch, worktreePath)
 		if err := git.RenameBranch(runner, worktreePath, originalBranch, newBranch); err != nil {
+			log.Printf("[branch-rename] renameBranch: RenameBranch error: %v", err)
 			return BranchRenameResultMsg{WorktreePath: worktreePath, Err: err}
 		}
 
+		log.Printf("[branch-rename] renameBranch: success %q -> %q", originalBranch, newBranch)
 		return BranchRenameResultMsg{WorktreePath: worktreePath, NewBranch: newBranch}
 	}
 }
