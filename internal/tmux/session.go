@@ -151,9 +151,16 @@ func createBackgroundWindow(runner Runner, sessionName string, startDir string) 
 
 // CreateSessionLayout creates a full session with main-window (3 panes) and
 // background-window (5 panes), returning a SessionLayout with all pane IDs.
-func CreateSessionLayout(runner Runner, sessionName string, startDir string) (SessionLayout, error) {
+// If startupCommand is non-empty, it is sent to the initial pane before splitting.
+func CreateSessionLayout(runner Runner, sessionName string, startDir string, startupCommand string) (SessionLayout, error) {
 	if _, err := runner.Run("new-session", "-d", "-s", sessionName, "-c", startDir); err != nil {
 		return SessionLayout{}, fmt.Errorf("creating session %s: %w", sessionName, err)
+	}
+
+	if startupCommand != "" {
+		if err := SendKeys(runner, sessionName+":0", startupCommand); err != nil {
+			return SessionLayout{}, fmt.Errorf("running startup command: %w", err)
+		}
 	}
 
 	if err := createMainWindow(runner, sessionName, startDir); err != nil {
@@ -180,7 +187,8 @@ func CreateSessionLayout(runner Runner, sessionName string, startDir string) (Se
 // SelectWorktreeSession finds or creates a tmux session for the given worktree path.
 // If the session already exists, it switches to it.
 // If not, it creates the full layout and switches to the new session.
-func SelectWorktreeSession(runner Runner, worktreePath string) (SessionLayout, error) {
+// startupCommand is sent to the initial pane before splitting (only for new sessions).
+func SelectWorktreeSession(runner Runner, worktreePath string, startupCommand string) (SessionLayout, error) {
 	sessionName := filepath.Base(worktreePath)
 
 	exists, _ := HasSession(runner, sessionName)
@@ -192,7 +200,7 @@ func SelectWorktreeSession(runner Runner, worktreePath string) (SessionLayout, e
 		return SessionLayout{SessionName: sessionName}, nil
 	}
 
-	layout, err := CreateSessionLayout(runner, sessionName, worktreePath)
+	layout, err := CreateSessionLayout(runner, sessionName, worktreePath, startupCommand)
 	if err != nil {
 		return SessionLayout{}, fmt.Errorf("creating session layout: %w", err)
 	}
