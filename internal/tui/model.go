@@ -493,12 +493,13 @@ func (m Model) updateAddWorktreeMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addingWorktree = false
 			m.loading = true
 			m.err = nil
+			repoName := repoNameFromConfig(m.config, m.addingWorktreeRepoPath)
 			if input == "" {
 				// Empty input: create worktree with random branch name
-				return m, addWorktreeCmd(m.runner, m.addingWorktreeRepoPath, m.config.WorktreeBasePath)
+				return m, addWorktreeCmd(m.runner, m.addingWorktreeRepoPath, m.config.WorktreeBasePath, repoName)
 			}
 			// URL input: clone from URL
-			return m, addWorktreeFromURLCmd(m.runner, m.ghRunner, m.addingWorktreeRepoPath, m.config.WorktreeBasePath, input)
+			return m, addWorktreeFromURLCmd(m.runner, m.ghRunner, m.addingWorktreeRepoPath, m.config.WorktreeBasePath, repoName, input)
 		case tea.KeyCtrlC:
 			m.quitting = true
 			return m, tea.Quit
@@ -586,7 +587,7 @@ func repoNameFromConfig(cfg model.Config, repoPath string) string {
 	return filepath.Base(repoPath)
 }
 
-func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath string) tea.Cmd {
+func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath, repoName string) tea.Cmd {
 	return func() tea.Msg {
 		userName, err := git.GetUserName(runner, repoPath)
 		if err != nil {
@@ -596,8 +597,12 @@ func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath string) tea.Cmd
 		country := git.RandomCountry()
 		slug := git.Slugify(country)
 		branch := userName + "/" + slug
-		newPath := filepath.Join(basePath, slug)
+		newPath := filepath.Join(basePath, repoName, slug)
 		createdAt := time.Now().UnixMilli()
+
+		if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+			return WorktreeAddErrMsg{Err: fmt.Errorf("creating parent directory: %w", err)}
+		}
 
 		if err := git.AddWorktree(runner, repoPath, newPath, branch); err != nil {
 			return WorktreeAddErrMsg{Err: err}
@@ -611,7 +616,7 @@ func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath string) tea.Cmd
 	}
 }
 
-func addWorktreeFromURLCmd(runner git.CommandRunner, ghRunner github.Runner, repoPath, basePath, rawURL string) tea.Cmd {
+func addWorktreeFromURLCmd(runner git.CommandRunner, ghRunner github.Runner, repoPath, basePath, repoName, rawURL string) tea.Cmd {
 	return func() tea.Msg {
 		urlInfo, err := github.ParseGitHubURL(rawURL)
 		if err != nil {
@@ -638,7 +643,11 @@ func addWorktreeFromURLCmd(runner git.CommandRunner, ghRunner github.Runner, rep
 		}
 
 		slug := github.BranchSlug(branch)
-		newPath := filepath.Join(basePath, slug)
+		newPath := filepath.Join(basePath, repoName, slug)
+
+		if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+			return WorktreeAddErrMsg{Err: fmt.Errorf("creating parent directory: %w", err)}
+		}
 
 		if err := git.AddWorktreeFromBranch(runner, repoPath, newPath, branch); err != nil {
 			return WorktreeAddErrMsg{Err: fmt.Errorf("creating worktree: %w", err)}

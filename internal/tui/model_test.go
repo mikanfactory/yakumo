@@ -399,7 +399,7 @@ func TestAddWorktreeCmd_Success(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon")
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon", "myrepo")
 	msg := cmd()
 
 	// The command will fail at AddWorktree because FakeCommandRunner won't have
@@ -420,7 +420,7 @@ func TestAddWorktreeCmd_UserNameError(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon")
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon", "myrepo")
 	msg := cmd()
 
 	errMsg, ok := msg.(WorktreeAddErrMsg)
@@ -1492,7 +1492,10 @@ func TestUpdate_AddWorktreeMode_Enter_Empty_CreatesRandom(t *testing.T) {
 	m := testModel()
 	m.addingWorktree = true
 	m.addingWorktreeRepoPath = "/code/repo1"
-	m.config = model.Config{WorktreeBasePath: "/tmp/shikon"}
+	m.config = model.Config{
+		WorktreeBasePath: "/tmp/shikon",
+		Repositories:     []model.RepositoryDef{{Name: "repo1", Path: "/code/repo1"}},
+	}
 
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := result.(Model)
@@ -1512,7 +1515,10 @@ func TestUpdate_AddWorktreeMode_Enter_URL_ClonesFromURL(t *testing.T) {
 	m := testModel()
 	m.addingWorktree = true
 	m.addingWorktreeRepoPath = "/code/repo1"
-	m.config = model.Config{WorktreeBasePath: "/tmp/shikon"}
+	m.config = model.Config{
+		WorktreeBasePath: "/tmp/shikon",
+		Repositories:     []model.RepositoryDef{{Name: "repo1", Path: "/code/repo1"}},
+	}
 	m.textInput.SetValue("https://github.com/owner/repo/tree/feature/my-branch")
 
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1547,7 +1553,7 @@ func TestUpdate_AddWorktreeMode_CtrlC_Quits(t *testing.T) {
 func TestAddWorktreeFromURLCmd_BranchURL(t *testing.T) {
 	branch := "feature/my-branch"
 	fetchKey := fmt.Sprintf("/repo:%v", []string{"fetch", "origin", branch})
-	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/my-branch", branch})
+	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/myrepo/my-branch", branch})
 
 	runner := git.FakeCommandRunner{
 		Outputs: map[string]string{
@@ -1556,7 +1562,7 @@ func TestAddWorktreeFromURLCmd_BranchURL(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "https://github.com/owner/repo/tree/feature/my-branch")
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "myrepo", "https://github.com/owner/repo/tree/feature/my-branch")
 	msg := cmd()
 
 	addedMsg, ok := msg.(WorktreeAddedMsg)
@@ -1566,15 +1572,15 @@ func TestAddWorktreeFromURLCmd_BranchURL(t *testing.T) {
 	if addedMsg.Branch != branch {
 		t.Errorf("Branch = %q, want %q", addedMsg.Branch, branch)
 	}
-	if addedMsg.WorktreePath != "/tmp/shikon/my-branch" {
-		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/my-branch")
+	if addedMsg.WorktreePath != "/tmp/shikon/myrepo/my-branch" {
+		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/myrepo/my-branch")
 	}
 }
 
 func TestAddWorktreeFromURLCmd_InvalidURL(t *testing.T) {
 	runner := git.FakeCommandRunner{}
 
-	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "not-a-url")
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "myrepo", "not-a-url")
 	msg := cmd()
 
 	_, ok := msg.(WorktreeAddErrMsg)
@@ -1586,7 +1592,7 @@ func TestAddWorktreeFromURLCmd_InvalidURL(t *testing.T) {
 func TestAddWorktreeFromURLCmd_PR_NoGhRunner(t *testing.T) {
 	runner := git.FakeCommandRunner{}
 
-	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "https://github.com/owner/repo/pull/42")
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "myrepo", "https://github.com/owner/repo/pull/42")
 	msg := cmd()
 
 	errMsg, ok := msg.(WorktreeAddErrMsg)
@@ -1603,7 +1609,7 @@ func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
 	ghKey := fmt.Sprintf("/repo:%v", []string{"pr", "view", prURL, "--json", "headRefName"})
 	branch := "feature/from-pr"
 	fetchKey := fmt.Sprintf("/repo:%v", []string{"fetch", "origin", branch})
-	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/from-pr", branch})
+	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/myrepo/from-pr", branch})
 
 	gitRunner := git.FakeCommandRunner{
 		Outputs: map[string]string{
@@ -1617,7 +1623,7 @@ func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeFromURLCmd(gitRunner, ghRunner, "/repo", "/tmp/shikon", prURL)
+	cmd := addWorktreeFromURLCmd(gitRunner, ghRunner, "/repo", "/tmp/shikon", "myrepo", prURL)
 	msg := cmd()
 
 	addedMsg, ok := msg.(WorktreeAddedMsg)
@@ -1627,8 +1633,8 @@ func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
 	if addedMsg.Branch != branch {
 		t.Errorf("Branch = %q, want %q", addedMsg.Branch, branch)
 	}
-	if addedMsg.WorktreePath != "/tmp/shikon/from-pr" {
-		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/from-pr")
+	if addedMsg.WorktreePath != "/tmp/shikon/myrepo/from-pr" {
+		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/myrepo/from-pr")
 	}
 }
 
