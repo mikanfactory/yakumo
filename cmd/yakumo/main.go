@@ -21,14 +21,41 @@ import (
 	"github.com/mikanfactory/yakumo/internal/tui"
 )
 
-func main() {
-	diffMode := flag.Bool("diff", false, "launch diff/PR review UI")
-	configPath := flag.String("config", "", "path to config file")
-	flag.Parse()
+const usage = `Usage: yakumo [command]
 
-	if *diffMode {
+Commands:
+  (default)         Launch worktree UI
+  diff-ui           Launch diff/PR review UI
+  swap-center       Swap center pane with background
+  swap-right-below  Swap right-below pane with background
+
+Flags (worktree UI only):
+  --config <path>   Path to config file
+`
+
+func main() {
+	if len(os.Args) < 2 {
+		runWorktreeUI("")
+		return
+	}
+
+	switch os.Args[1] {
+	case "diff-ui":
 		runDiffUI()
-	} else {
+	case "swap-center":
+		runSwapCenter()
+	case "swap-right-below":
+		runSwapRightBelow()
+	case "--diff":
+		fmt.Fprintln(os.Stderr, "Warning: --diff is deprecated, use 'yakumo diff-ui' instead")
+		runDiffUI()
+	case "--help", "-h", "help":
+		fmt.Print(usage)
+	default:
+		fs := flag.NewFlagSet("yakumo", flag.ExitOnError)
+		fs.Usage = func() { fmt.Print(usage) }
+		configPath := fs.String("config", "", "path to config file")
+		fs.Parse(os.Args[1:])
 		runWorktreeUI(*configPath)
 	}
 }
@@ -140,12 +167,36 @@ func runWorktreeUI(configPath string) {
 	fmt.Print(selected)
 }
 
+func runSwapCenter() {
+	if !tmux.IsInsideTmux() {
+		fmt.Fprintln(os.Stderr, "error: swap-center requires running inside tmux")
+		os.Exit(1)
+	}
+	runner := tmux.OSRunner{}
+	if err := tmux.SwapCenter(runner); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runSwapRightBelow() {
+	if !tmux.IsInsideTmux() {
+		fmt.Fprintln(os.Stderr, "error: swap-right-below requires running inside tmux")
+		os.Exit(1)
+	}
+	runner := tmux.OSRunner{}
+	if err := tmux.SwapRightBelow(runner); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func diffUICommand() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
 	}
-	return exe + " --diff"
+	return exe + " diff-ui"
 }
 
 func findRepoByPath(cfg model.Config, repoPath string) model.RepositoryDef {

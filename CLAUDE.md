@@ -13,7 +13,13 @@ Git worktreeを管理するためのターミナルUIアプリケーション。
 go run ./cmd/yakumo
 
 # 実行（diff UI）
-go run ./cmd/yakumo -- --diff
+go run ./cmd/yakumo -- diff-ui
+
+# 実行（swap center pane）
+go run ./cmd/yakumo -- swap-center
+
+# 実行（swap right-below pane）
+go run ./cmd/yakumo -- swap-right-below
 
 # ビルド
 go build -o yakumo ./cmd/yakumo
@@ -29,7 +35,7 @@ go test -cover ./...
 
 Bubble TeaのElm Architecture (Model-Update-View) パターンに従う。
 
-- `cmd/yakumo/main.go` - 統合エントリーポイント（`--diff` フラグでdiff UIに切替）
+- `cmd/yakumo/main.go` - 統合エントリーポイント（サブコマンドでUI切替）
 - `internal/tui/` - worktree UI (Model-Update-View)
 - `internal/diffui/` - diff/PR review UI (Model-Update-View)
 - `Model` - アプリケーション状態（worktreeリスト、カーソル位置）
