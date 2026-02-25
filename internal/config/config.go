@@ -39,6 +39,20 @@ func LoadFromFile(path string) (model.Config, error) {
 			return model.Config{}, fmt.Errorf("getting home directory: %w", err)
 		}
 		cfg.WorktreeBasePath = filepath.Join(home, "shikon")
+	} else if strings.HasPrefix(cfg.WorktreeBasePath, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return model.Config{}, fmt.Errorf("expanding home directory: %w", err)
+		}
+		cfg.WorktreeBasePath = filepath.Join(home, cfg.WorktreeBasePath[2:])
+	}
+
+	if strings.HasPrefix(cfg.WorktreeBasePath, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return model.Config{}, fmt.Errorf("expanding home directory: %w", err)
+		}
+		cfg.WorktreeBasePath = filepath.Join(home, cfg.WorktreeBasePath[2:])
 	}
 
 	for _, repo := range cfg.Repositories {

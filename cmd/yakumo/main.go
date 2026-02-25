@@ -3,9 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
@@ -17,6 +20,7 @@ import (
 	"github.com/mikanfactory/yakumo/internal/git"
 	"github.com/mikanfactory/yakumo/internal/github"
 	"github.com/mikanfactory/yakumo/internal/model"
+	"github.com/mikanfactory/yakumo/internal/rename"
 	"github.com/mikanfactory/yakumo/internal/tmux"
 	"github.com/mikanfactory/yakumo/internal/tui"
 )
@@ -28,6 +32,7 @@ Commands:
   diff-ui           Launch diff/PR review UI
   swap-center       Swap center pane with background
   swap-right-below  Swap right-below pane with background
+  watch-rename      Watch for Claude prompt and rename branch (internal)
 
 Flags (worktree UI only):
   --config <path>   Path to config file
@@ -46,6 +51,8 @@ func main() {
 		runSwapCenter()
 	case "swap-right-below":
 		runSwapRightBelow()
+	case "watch-rename":
+		runWatchRename()
 	case "--diff":
 		fmt.Fprintln(os.Stderr, "Warning: --diff is deprecated, use 'yakumo diff-ui' instead")
 		runDiffUI()
@@ -85,7 +92,22 @@ func runDiffUI() {
 	}
 }
 
+func setupDebugLog() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	logPath := filepath.Join(home, ".config", "yakumo", "debug.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	log.SetOutput(f)
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+}
+
 func runWorktreeUI(configPath string) {
+	setupDebugLog()
 	zone.NewGlobal()
 
 	cfg, err := config.Load(configPath)
@@ -144,21 +166,15 @@ func runWorktreeUI(configPath string) {
 
 	if tmux.IsInsideTmux() {
 		tmuxRunner := tmux.OSRunner{}
-		layout, err := tmux.SelectWorktreeSession(tmuxRunner, selected)
+		repo := findRepoByPath(cfg, finalModel.SelectedRepoPath())
+		layout, err := tmux.SelectWorktreeSession(tmuxRunner, selected, repo.StartupCommand)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tmux error: %v\n", err)
 			os.Exit(1)
 		}
 
-		// Run startup commands only for newly created sessions
+		// Run additional commands only for newly created sessions
 		if layout.BottomRight1.PaneID != "" {
-			repo := findRepoByPath(cfg, finalModel.SelectedRepoPath())
-			if repo.StartupCommand != "" {
-				if err := tmux.SendKeys(tmuxRunner, layout.BottomRight1.PaneID, repo.StartupCommand); err != nil {
-					fmt.Fprintf(os.Stderr, "startup command error: %v\n", err)
-				}
-			}
-
 			// Launch diff-ui in top-right pane
 			if diffCmd := diffUICommand(); diffCmd != "" {
 				if err := tmux.SendKeys(tmuxRunner, layout.TopRight1.PaneID, diffCmd); err != nil {
@@ -166,13 +182,30 @@ func runWorktreeUI(configPath string) {
 				}
 			}
 
-			// Launch claude CLI in center pane
+			// Ensure claude trust and launch claude CLI in center pane
 			if _, err := exec.LookPath("claude"); err == nil {
+				if home, err := os.UserHomeDir(); err == nil {
+					configPath := filepath.Join(home, ".claude.json")
+					if trustErr := claude.EnsureDirectoryTrusted(configPath, selected); trustErr != nil {
+						fmt.Fprintf(os.Stderr, "claude trust warning: %v\n", trustErr)
+					}
+				}
 				if err := tmux.SendKeys(tmuxRunner, layout.Center1.PaneID, "claude"); err != nil {
 					fmt.Fprintf(os.Stderr, "claude launch error: %v\n", err)
 				}
 			}
+
+			// Focus center pane after all commands are sent
+			if err := tmux.SelectPane(tmuxRunner, layout.Center1.PaneID); err != nil {
+				fmt.Fprintf(os.Stderr, "select pane error: %v\n", err)
+			}
 		}
+
+		// Spawn background rename watcher if there is a pending rename
+		if renameInfo := finalModel.PendingRename(selected); renameInfo != nil {
+			spawnRenameWatcher(selected, renameInfo.OriginalBranch, renameInfo.CreatedAt)
+		}
+
 		return
 	}
 
@@ -209,6 +242,73 @@ func diffUICommand() string {
 		return ""
 	}
 	return exe + " diff-ui"
+}
+
+func runWatchRename() {
+	fs := flag.NewFlagSet("watch-rename", flag.ExitOnError)
+	wtPath := fs.String("path", "", "absolute path to the worktree")
+	branch := fs.String("branch", "", "original branch name")
+	createdAtStr := fs.String("created-at", "", "unix millisecond timestamp")
+	fs.Parse(os.Args[2:])
+
+	if *wtPath == "" || *branch == "" || *createdAtStr == "" {
+		fmt.Fprintln(os.Stderr, "watch-rename requires --path, --branch, and --created-at flags")
+		os.Exit(1)
+	}
+
+	createdAt, err := strconv.ParseInt(*createdAtStr, 10, 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid --created-at: %v\n", err)
+		os.Exit(1)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		os.Exit(1)
+	}
+
+	claudePath, err := exec.LookPath("claude")
+	if err != nil {
+		os.Exit(1)
+	}
+
+	reader := claude.OSReader{
+		HistoryPath: filepath.Join(home, ".claude", "history.jsonl"),
+	}
+	gen := branchname.CLIGenerator{ClaudePath: claudePath}
+	runner := git.OSCommandRunner{}
+
+	cfg := rename.WatcherConfig{
+		WorktreePath: *wtPath,
+		Branch:       *branch,
+		CreatedAt:    createdAt,
+		PollInterval: 2 * time.Second,
+		Timeout:      10 * time.Minute,
+	}
+
+	w := rename.NewWatcher(cfg, reader, gen, runner)
+	if err := w.Run(); err != nil {
+		// Silently exit; this is a background process
+		os.Exit(1)
+	}
+}
+
+func spawnRenameWatcher(worktreePath, branch string, createdAt int64) {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+
+	cmd := exec.Command(exe, "watch-rename",
+		"--path", worktreePath,
+		"--branch", branch,
+		"--created-at", strconv.FormatInt(createdAt, 10),
+	)
+	// Detach from parent process
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+	_ = cmd.Start()
 }
 
 func findRepoByPath(cfg model.Config, repoPath string) model.RepositoryDef {

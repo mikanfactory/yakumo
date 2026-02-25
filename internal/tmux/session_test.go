@@ -141,6 +141,37 @@ func TestHasSession_NotExists(t *testing.T) {
 	}
 }
 
+// --- KillSession tests ---
+
+func TestKillSession_Success(t *testing.T) {
+	runner := &FakeRunner{
+		Outputs: map[string]string{
+			"[kill-session -t my-session]": "",
+		},
+	}
+
+	err := KillSession(runner, "my-session")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(runner.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runner.Calls))
+	}
+}
+
+func TestKillSession_Error(t *testing.T) {
+	runner := &FakeRunner{
+		Errors: map[string]error{
+			"[kill-session -t nonexistent]": fmt.Errorf("session not found"),
+		},
+	}
+
+	err := KillSession(runner, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 // --- SwitchToSession tests ---
 
 func TestSwitchToSession_Success(t *testing.T) {
@@ -358,7 +389,7 @@ func newFullSessionRunner(session string, dir string) *FakeRunner {
 func TestCreateSessionLayout_Success(t *testing.T) {
 	runner := newFullSessionRunner("feat", "/repos/feat")
 
-	layout, err := CreateSessionLayout(runner, "feat", "/repos/feat")
+	layout, err := CreateSessionLayout(runner, "feat", "/repos/feat", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -381,7 +412,7 @@ func TestCreateSessionLayout_NewSessionError(t *testing.T) {
 		},
 	}
 
-	_, err := CreateSessionLayout(runner, "s", "/p")
+	_, err := CreateSessionLayout(runner, "s", "/p", "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -397,7 +428,7 @@ func TestCreateSessionLayout_MainWindowError(t *testing.T) {
 		},
 	}
 
-	_, err := CreateSessionLayout(runner, "s", "/p")
+	_, err := CreateSessionLayout(runner, "s", "/p", "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -416,9 +447,63 @@ func TestCreateSessionLayout_ListMainPanesError(t *testing.T) {
 		},
 	}
 
-	_, err := CreateSessionLayout(runner, "s", "/p")
+	_, err := CreateSessionLayout(runner, "s", "/p", "")
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+// --- CreateSessionLayout startup command tests ---
+
+func TestCreateSessionLayout_WithStartupCommand(t *testing.T) {
+	runner := newFullSessionRunner("feat", "/repos/feat")
+	// Add send-keys for startup command
+	runner.Outputs["[send-keys -t feat:0 npm run dev Enter]"] = ""
+
+	layout, err := CreateSessionLayout(runner, "feat", "/repos/feat", "npm run dev")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if layout.Center1.PaneID != "%0" {
+		t.Errorf("Center1.PaneID = %q, want %%0", layout.Center1.PaneID)
+	}
+
+	// Verify send-keys was called before rename-window (split)
+	sendKeysIdx := -1
+	renameIdx := -1
+	for i, call := range runner.Calls {
+		if len(call) >= 2 && call[0] == "send-keys" && call[2] == "feat:0" {
+			sendKeysIdx = i
+		}
+		if len(call) >= 1 && call[0] == "rename-window" {
+			renameIdx = i
+		}
+	}
+	if sendKeysIdx == -1 {
+		t.Fatal("expected send-keys call for startup command")
+	}
+	if renameIdx == -1 {
+		t.Fatal("expected rename-window call")
+	}
+	if sendKeysIdx >= renameIdx {
+		t.Errorf("send-keys (idx=%d) should be called before rename-window (idx=%d)", sendKeysIdx, renameIdx)
+	}
+}
+
+func TestCreateSessionLayout_EmptyStartupCommand(t *testing.T) {
+	runner := newFullSessionRunner("feat", "/repos/feat")
+
+	_, err := CreateSessionLayout(runner, "feat", "/repos/feat", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify no send-keys was called
+	for _, call := range runner.Calls {
+		if call[0] == "send-keys" {
+			t.Error("should not call send-keys when startup command is empty")
+		}
 	}
 }
 
@@ -433,7 +518,7 @@ func TestSelectWorktreeSession_ExistingSession(t *testing.T) {
 		},
 	}
 
-	layout, err := SelectWorktreeSession(runner, "/repos/my-worktree")
+	layout, err := SelectWorktreeSession(runner, "/repos/my-worktree", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -467,7 +552,7 @@ func TestSelectWorktreeSession_NewSession(t *testing.T) {
 		},
 	}
 
-	layout, err := SelectWorktreeSession(runner, "/repos/feat")
+	layout, err := SelectWorktreeSession(runner, "/repos/feat", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -487,7 +572,7 @@ func TestSelectWorktreeSession_CreateError(t *testing.T) {
 		},
 	}
 
-	_, err := SelectWorktreeSession(runner, "/bad")
+	_, err := SelectWorktreeSession(runner, "/bad", "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -511,7 +596,7 @@ func TestSelectWorktreeSession_SwitchAfterCreateError(t *testing.T) {
 		},
 	}
 
-	_, err := SelectWorktreeSession(runner, "/repos/feat")
+	_, err := SelectWorktreeSession(runner, "/repos/feat", "")
 	if err == nil {
 		t.Fatal("expected error")
 	}

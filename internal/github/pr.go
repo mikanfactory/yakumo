@@ -16,6 +16,7 @@ type PRView struct {
 	ReviewDecision    string            `json:"reviewDecision"`
 	StatusCheckRollup []StatusCheckNode `json:"statusCheckRollup"`
 	Comments          []CommentNode     `json:"comments"`
+	URL               string            `json:"url"`
 }
 
 // StatusCheckNode represents a CI check or status check.
@@ -79,7 +80,7 @@ func (c CommentNode) Preview(maxLen int) string {
 	return body
 }
 
-var prViewFields = "title,body,state,mergeStateStatus,reviewDecision,statusCheckRollup,comments"
+var prViewFields = "title,body,state,mergeStateStatus,reviewDecision,statusCheckRollup,comments,url"
 
 // FetchPR runs `gh pr view` and returns the parsed PR data.
 func FetchPR(runner Runner, dir string) (PRView, error) {

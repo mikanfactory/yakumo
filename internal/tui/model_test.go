@@ -369,6 +369,29 @@ func TestUpdate_WorktreeAddErrMsg(t *testing.T) {
 	}
 }
 
+func TestRepoNameFromConfig(t *testing.T) {
+	cfg := model.Config{
+		Repositories: []model.RepositoryDef{
+			{Name: "yakumo", Path: "/code/yakumo"},
+			{Name: "other", Path: "/code/other"},
+		},
+	}
+
+	t.Run("match", func(t *testing.T) {
+		got := repoNameFromConfig(cfg, "/code/yakumo")
+		if got != "yakumo" {
+			t.Errorf("repoNameFromConfig() = %q, want %q", got, "yakumo")
+		}
+	})
+
+	t.Run("fallback", func(t *testing.T) {
+		got := repoNameFromConfig(cfg, "/unknown/path/myrepo")
+		if got != "myrepo" {
+			t.Errorf("repoNameFromConfig() = %q, want %q", got, "myrepo")
+		}
+	})
+}
+
 func TestAddWorktreeCmd_Success(t *testing.T) {
 	runner := git.FakeCommandRunner{
 		Outputs: map[string]string{
@@ -376,7 +399,7 @@ func TestAddWorktreeCmd_Success(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon")
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon", "myrepo")
 	msg := cmd()
 
 	// The command will fail at AddWorktree because FakeCommandRunner won't have
@@ -397,7 +420,7 @@ func TestAddWorktreeCmd_UserNameError(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon")
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon", "myrepo")
 	msg := cmd()
 
 	errMsg, ok := msg.(WorktreeAddErrMsg)
@@ -1419,12 +1442,29 @@ func TestArchiveWorktreeCmd_Success(t *testing.T) {
 			"/repo:[worktree remove /tmp/old-worktree]": "",
 		},
 	}
+	tmuxRunner := &tmux.FakeRunner{
+		Outputs: map[string]string{
+			"[kill-session -t old-worktree]": "",
+		},
+	}
 
-	cmd := archiveWorktreeCmd(runner, "/repo", "/tmp/old-worktree")
+	cmd := archiveWorktreeCmd(runner, tmuxRunner, "/repo", "/tmp/old-worktree")
 	msg := cmd()
 
 	if _, ok := msg.(WorktreeArchivedMsg); !ok {
 		t.Fatalf("expected WorktreeArchivedMsg, got %T", msg)
+	}
+
+	// Verify kill-session was called
+	found := false
+	for _, call := range tmuxRunner.Calls {
+		if len(call) >= 1 && call[0] == "kill-session" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected kill-session to be called")
 	}
 }
 
@@ -1432,8 +1472,13 @@ func TestArchiveWorktreeCmd_Error(t *testing.T) {
 	runner := git.FakeCommandRunner{
 		Outputs: map[string]string{},
 	}
+	tmuxRunner := &tmux.FakeRunner{
+		Outputs: map[string]string{
+			"[kill-session -t old-worktree]": "",
+		},
+	}
 
-	cmd := archiveWorktreeCmd(runner, "/repo", "/tmp/old-worktree")
+	cmd := archiveWorktreeCmd(runner, tmuxRunner, "/repo", "/tmp/old-worktree")
 	msg := cmd()
 
 	errMsg, ok := msg.(WorktreeArchiveErrMsg)
@@ -1442,6 +1487,48 @@ func TestArchiveWorktreeCmd_Error(t *testing.T) {
 	}
 	if errMsg.Err == nil {
 		t.Error("expected error to be set")
+	}
+}
+
+func TestArchiveWorktreeCmd_NilTmuxRunner(t *testing.T) {
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			"/repo:[worktree remove /tmp/old-worktree]": "",
+		},
+	}
+
+	cmd := archiveWorktreeCmd(runner, nil, "/repo", "/tmp/old-worktree")
+	msg := cmd()
+
+	if _, ok := msg.(WorktreeArchivedMsg); !ok {
+		t.Fatalf("expected WorktreeArchivedMsg, got %T", msg)
+	}
+}
+
+func TestArchiveWorktreeCmd_RemovesDirectory(t *testing.T) {
+	// Create a temp directory to simulate a leftover worktree directory
+	tmpDir := t.TempDir()
+	worktreePath := filepath.Join(tmpDir, "leftover-wt")
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			fmt.Sprintf("%s:[worktree remove %s]", tmpDir, worktreePath): "",
+		},
+	}
+
+	cmd := archiveWorktreeCmd(runner, nil, tmpDir, worktreePath)
+	msg := cmd()
+
+	if _, ok := msg.(WorktreeArchivedMsg); !ok {
+		t.Fatalf("expected WorktreeArchivedMsg, got %T", msg)
+	}
+
+	// Verify directory was removed
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Errorf("expected worktree directory to be removed, but it still exists")
 	}
 }
 
@@ -1469,7 +1556,10 @@ func TestUpdate_AddWorktreeMode_Enter_Empty_CreatesRandom(t *testing.T) {
 	m := testModel()
 	m.addingWorktree = true
 	m.addingWorktreeRepoPath = "/code/repo1"
-	m.config = model.Config{WorktreeBasePath: "/tmp/shikon"}
+	m.config = model.Config{
+		WorktreeBasePath: "/tmp/shikon",
+		Repositories:     []model.RepositoryDef{{Name: "repo1", Path: "/code/repo1"}},
+	}
 
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := result.(Model)
@@ -1489,7 +1579,10 @@ func TestUpdate_AddWorktreeMode_Enter_URL_ClonesFromURL(t *testing.T) {
 	m := testModel()
 	m.addingWorktree = true
 	m.addingWorktreeRepoPath = "/code/repo1"
-	m.config = model.Config{WorktreeBasePath: "/tmp/shikon"}
+	m.config = model.Config{
+		WorktreeBasePath: "/tmp/shikon",
+		Repositories:     []model.RepositoryDef{{Name: "repo1", Path: "/code/repo1"}},
+	}
 	m.textInput.SetValue("https://github.com/owner/repo/tree/feature/my-branch")
 
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1524,7 +1617,7 @@ func TestUpdate_AddWorktreeMode_CtrlC_Quits(t *testing.T) {
 func TestAddWorktreeFromURLCmd_BranchURL(t *testing.T) {
 	branch := "feature/my-branch"
 	fetchKey := fmt.Sprintf("/repo:%v", []string{"fetch", "origin", branch})
-	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/my-branch", branch})
+	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/myrepo/my-branch", branch})
 
 	runner := git.FakeCommandRunner{
 		Outputs: map[string]string{
@@ -1533,7 +1626,7 @@ func TestAddWorktreeFromURLCmd_BranchURL(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "https://github.com/owner/repo/tree/feature/my-branch")
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "myrepo", "https://github.com/owner/repo/tree/feature/my-branch")
 	msg := cmd()
 
 	addedMsg, ok := msg.(WorktreeAddedMsg)
@@ -1543,15 +1636,15 @@ func TestAddWorktreeFromURLCmd_BranchURL(t *testing.T) {
 	if addedMsg.Branch != branch {
 		t.Errorf("Branch = %q, want %q", addedMsg.Branch, branch)
 	}
-	if addedMsg.WorktreePath != "/tmp/shikon/my-branch" {
-		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/my-branch")
+	if addedMsg.WorktreePath != "/tmp/shikon/myrepo/my-branch" {
+		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/myrepo/my-branch")
 	}
 }
 
 func TestAddWorktreeFromURLCmd_InvalidURL(t *testing.T) {
 	runner := git.FakeCommandRunner{}
 
-	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "not-a-url")
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "myrepo", "not-a-url")
 	msg := cmd()
 
 	_, ok := msg.(WorktreeAddErrMsg)
@@ -1563,7 +1656,7 @@ func TestAddWorktreeFromURLCmd_InvalidURL(t *testing.T) {
 func TestAddWorktreeFromURLCmd_PR_NoGhRunner(t *testing.T) {
 	runner := git.FakeCommandRunner{}
 
-	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "https://github.com/owner/repo/pull/42")
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "myrepo", "https://github.com/owner/repo/pull/42")
 	msg := cmd()
 
 	errMsg, ok := msg.(WorktreeAddErrMsg)
@@ -1580,7 +1673,7 @@ func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
 	ghKey := fmt.Sprintf("/repo:%v", []string{"pr", "view", prURL, "--json", "headRefName"})
 	branch := "feature/from-pr"
 	fetchKey := fmt.Sprintf("/repo:%v", []string{"fetch", "origin", branch})
-	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/from-pr", branch})
+	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/myrepo/from-pr", branch})
 
 	gitRunner := git.FakeCommandRunner{
 		Outputs: map[string]string{
@@ -1594,7 +1687,7 @@ func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeFromURLCmd(gitRunner, ghRunner, "/repo", "/tmp/shikon", prURL)
+	cmd := addWorktreeFromURLCmd(gitRunner, ghRunner, "/repo", "/tmp/shikon", "myrepo", prURL)
 	msg := cmd()
 
 	addedMsg, ok := msg.(WorktreeAddedMsg)
@@ -1604,8 +1697,66 @@ func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
 	if addedMsg.Branch != branch {
 		t.Errorf("Branch = %q, want %q", addedMsg.Branch, branch)
 	}
-	if addedMsg.WorktreePath != "/tmp/shikon/from-pr" {
-		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/from-pr")
+	if addedMsg.WorktreePath != "/tmp/shikon/myrepo/from-pr" {
+		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/myrepo/from-pr")
+	}
+}
+
+func TestPendingRename_Found(t *testing.T) {
+	m := testModel()
+	m.branchRenames = map[string]model.BranchRenameInfo{
+		"/tmp/shikon/south-korea": {
+			Status:         model.RenameStatusPending,
+			OriginalBranch: "shoji/south-korea",
+			WorktreePath:   "/tmp/shikon/south-korea",
+			CreatedAt:      1000,
+		},
+	}
+
+	info := m.PendingRename("/tmp/shikon/south-korea")
+	if info == nil {
+		t.Fatal("expected non-nil PendingRename result")
+	}
+	if info.OriginalBranch != "shoji/south-korea" {
+		t.Errorf("OriginalBranch = %q, want %q", info.OriginalBranch, "shoji/south-korea")
+	}
+	if info.CreatedAt != 1000 {
+		t.Errorf("CreatedAt = %d, want 1000", info.CreatedAt)
+	}
+}
+
+func TestPendingRename_NotPending(t *testing.T) {
+	m := testModel()
+	m.branchRenames = map[string]model.BranchRenameInfo{
+		"/tmp/shikon/south-korea": {
+			Status:         model.RenameStatusCompleted,
+			OriginalBranch: "shoji/south-korea",
+		},
+	}
+
+	info := m.PendingRename("/tmp/shikon/south-korea")
+	if info != nil {
+		t.Error("expected nil for completed rename")
+	}
+}
+
+func TestPendingRename_NotFound(t *testing.T) {
+	m := testModel()
+	m.branchRenames = map[string]model.BranchRenameInfo{}
+
+	info := m.PendingRename("/tmp/shikon/nonexistent")
+	if info != nil {
+		t.Error("expected nil for missing path")
+	}
+}
+
+func TestPendingRename_NilRenames(t *testing.T) {
+	m := testModel()
+	// branchRenames is nil (feature disabled)
+
+	info := m.PendingRename("/tmp/shikon/south-korea")
+	if info != nil {
+		t.Error("expected nil when branchRenames is nil")
 	}
 }
 

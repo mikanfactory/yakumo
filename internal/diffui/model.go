@@ -83,6 +83,7 @@ type ChangesModel struct {
 type ChecksModel struct {
 	prTitle       string
 	prDescription string
+	prURL         string
 	gitStatus     string
 	commitsBehind int
 	checks        []CheckResult
@@ -362,7 +363,7 @@ func openVimInIdleCenterPaneCmd(runner tmux.Runner, filePath string) tea.Cmd {
 
 func fetchChangesCmd(runner git.CommandRunner, dir string) tea.Cmd {
 	return func() tea.Msg {
-		entries, err := git.GetDiffNumstat(runner, dir, "origin/main")
+		entries, err := git.GetAllChanges(runner, dir, "origin/main")
 		if err != nil {
 			return ChangesDataErrMsg{Err: err}
 		}
@@ -410,6 +411,7 @@ func fetchChecksCmd(ghRunner github.Runner, gitRunner git.CommandRunner, dir str
 			Checks: ChecksModel{
 				prTitle:       pr.Title,
 				prDescription: pr.Body,
+				prURL:         pr.URL,
 				gitStatus:     gitStatus,
 				commitsBehind: commitsBehind,
 				checks:        checks,

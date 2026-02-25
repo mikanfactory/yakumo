@@ -156,6 +156,9 @@ func (m ChecksModel) view(width, height int) string {
 
 	// PR Title
 	allLines = append(allLines, prTitleStyle.Render(m.prTitle))
+	if m.prURL != "" {
+		allLines = append(allLines, filePathDimStyle.Render(m.prURL))
+	}
 	allLines = append(allLines, "")
 
 	// PR Description

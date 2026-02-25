@@ -96,6 +96,113 @@ func TestGetDiffNumstat_Error(t *testing.T) {
 	}
 }
 
+func TestGetAllChanges(t *testing.T) {
+	t.Run("committed only", func(t *testing.T) {
+		runner := FakeCommandRunner{
+			Outputs: map[string]string{
+				"/repo:[diff origin/main...HEAD --numstat]": "10\t3\tmain.go\n",
+				"/repo:[diff HEAD --numstat]":               "",
+			},
+		}
+
+		got, err := GetAllChanges(runner, "/repo", "origin/main")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("got %d entries, want 1", len(got))
+		}
+		if got[0].Path != "main.go" || got[0].Additions != 10 || got[0].Deletions != 3 {
+			t.Errorf("got %+v, want {main.go 10 3}", got[0])
+		}
+	})
+
+	t.Run("uncommitted only", func(t *testing.T) {
+		runner := FakeCommandRunner{
+			Outputs: map[string]string{
+				"/repo:[diff origin/main...HEAD --numstat]": "",
+				"/repo:[diff HEAD --numstat]":               "5\t2\tnew_file.go\n",
+			},
+		}
+
+		got, err := GetAllChanges(runner, "/repo", "origin/main")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("got %d entries, want 1", len(got))
+		}
+		if got[0].Path != "new_file.go" || got[0].Additions != 5 || got[0].Deletions != 2 {
+			t.Errorf("got %+v, want {new_file.go 5 2}", got[0])
+		}
+	})
+
+	t.Run("committed and uncommitted with overlap", func(t *testing.T) {
+		runner := FakeCommandRunner{
+			Outputs: map[string]string{
+				"/repo:[diff origin/main...HEAD --numstat]": "10\t3\tmain.go\n5\t1\tutils.go\n",
+				"/repo:[diff HEAD --numstat]":               "2\t1\tmain.go\n7\t0\tnew.go\n",
+			},
+		}
+
+		got, err := GetAllChanges(runner, "/repo", "origin/main")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("got %d entries, want 3", len(got))
+		}
+
+		// main.go should be merged: 10+2=12 additions, 3+1=4 deletions
+		if got[0].Path != "main.go" || got[0].Additions != 12 || got[0].Deletions != 4 {
+			t.Errorf("entry[0] = %+v, want {main.go 12 4}", got[0])
+		}
+		// utils.go committed only
+		if got[1].Path != "utils.go" || got[1].Additions != 5 || got[1].Deletions != 1 {
+			t.Errorf("entry[1] = %+v, want {utils.go 5 1}", got[1])
+		}
+		// new.go uncommitted only
+		if got[2].Path != "new.go" || got[2].Additions != 7 || got[2].Deletions != 0 {
+			t.Errorf("entry[2] = %+v, want {new.go 7 0}", got[2])
+		}
+	})
+
+	t.Run("uncommitted error falls back to committed", func(t *testing.T) {
+		runner := FakeCommandRunner{
+			Outputs: map[string]string{
+				"/repo:[diff origin/main...HEAD --numstat]": "10\t3\tmain.go\n",
+			},
+			Errors: map[string]error{
+				"/repo:[diff HEAD --numstat]": fmt.Errorf("no HEAD"),
+			},
+		}
+
+		got, err := GetAllChanges(runner, "/repo", "origin/main")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("got %d entries, want 1", len(got))
+		}
+		if got[0].Path != "main.go" {
+			t.Errorf("got path %q, want main.go", got[0].Path)
+		}
+	})
+
+	t.Run("committed error propagates", func(t *testing.T) {
+		runner := FakeCommandRunner{
+			Errors: map[string]error{
+				"/repo:[diff origin/main...HEAD --numstat]": fmt.Errorf("not a git repo"),
+			},
+		}
+
+		_, err := GetAllChanges(runner, "/repo", "origin/main")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
 func TestGetCommitsBehind(t *testing.T) {
 	tests := []struct {
 		name   string

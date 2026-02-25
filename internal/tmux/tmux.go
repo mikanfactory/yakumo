@@ -80,6 +80,7 @@ func PaneCurrentCommand(runner Runner, target string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+
 // parseWindowList parses `tmux list-windows` output and returns the window index
 // for the window matching the given name, or empty string if not found.
 func parseWindowList(output string, windowName string) string {

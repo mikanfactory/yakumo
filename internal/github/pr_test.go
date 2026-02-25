@@ -27,7 +27,8 @@ func TestFetchPR(t *testing.T) {
 				"body": "LGTM, looks good to merge",
 				"createdAt": "2025-01-01T01:00:00Z"
 			}
-		]
+		],
+		"url": "https://github.com/owner/repo/pull/1"
 	}`
 
 	runner := &FakeRunner{
@@ -61,6 +62,9 @@ func TestFetchPR(t *testing.T) {
 	}
 	if pr.Comments[0].Author.Login != "reviewer" {
 		t.Errorf("comment author = %q, want %q", pr.Comments[0].Author.Login, "reviewer")
+	}
+	if pr.URL != "https://github.com/owner/repo/pull/1" {
+		t.Errorf("url = %q, want %q", pr.URL, "https://github.com/owner/repo/pull/1")
 	}
 }
 

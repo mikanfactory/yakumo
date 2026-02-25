@@ -494,6 +494,56 @@ func TestLoadFromFile_WithoutCommands_BackwardCompat(t *testing.T) {
 	}
 }
 
+func TestLoadFromFile_TildeExpansion(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	content := `worktree_base_path: ~/shikon
+repositories:
+  - name: myrepo
+    path: /home/user/myrepo
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile failed: %v", err)
+	}
+
+	want := filepath.Join(tmpHome, "shikon")
+	if cfg.WorktreeBasePath != want {
+		t.Errorf("WorktreeBasePath = %q, want %q", cfg.WorktreeBasePath, want)
+	}
+}
+
+func TestLoadFromFile_TildeExpansion_AbsolutePathUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	content := `worktree_base_path: /absolute/path/shikon
+repositories:
+  - name: myrepo
+    path: /home/user/myrepo
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadFromFile failed: %v", err)
+	}
+
+	if cfg.WorktreeBasePath != "/absolute/path/shikon" {
+		t.Errorf("WorktreeBasePath = %q, want %q", cfg.WorktreeBasePath, "/absolute/path/shikon")
+	}
+}
+
 func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

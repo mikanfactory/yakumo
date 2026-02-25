@@ -53,6 +53,52 @@ func parseDiffNumstat(output string) []DiffEntry {
 	return entries
 }
 
+// GetAllChanges returns committed changes (base...HEAD) merged with uncommitted
+// changes (working tree + staged vs HEAD), deduplicated by path.
+func GetAllChanges(runner CommandRunner, dir string, base string) ([]DiffEntry, error) {
+	committed, err := GetDiffNumstat(runner, dir, base)
+	if err != nil {
+		return nil, err
+	}
+
+	out, err := runner.Run(dir, "diff", "HEAD", "--numstat")
+	if err != nil {
+		return committed, nil
+	}
+	uncommitted := parseDiffNumstat(out)
+
+	return mergeEntries(committed, uncommitted), nil
+}
+
+// mergeEntries merges two slices of DiffEntry by path. When both contain the
+// same path, additions and deletions are summed. Order follows committed first,
+// then any uncommitted-only entries appended.
+func mergeEntries(committed, uncommitted []DiffEntry) []DiffEntry {
+	if len(uncommitted) == 0 {
+		return committed
+	}
+
+	seen := make(map[string]int, len(committed))
+	result := make([]DiffEntry, len(committed))
+	copy(result, committed)
+
+	for i, e := range result {
+		seen[e.Path] = i
+	}
+
+	for _, u := range uncommitted {
+		if idx, ok := seen[u.Path]; ok {
+			result[idx].Additions += u.Additions
+			result[idx].Deletions += u.Deletions
+		} else {
+			seen[u.Path] = len(result)
+			result = append(result, u)
+		}
+	}
+
+	return result
+}
+
 // GetCommitsBehind returns how many commits HEAD is behind the given base ref.
 func GetCommitsBehind(runner CommandRunner, dir string, base string) (int, error) {
 	out, err := runner.Run(dir, "rev-list", "--count", "HEAD.."+base)

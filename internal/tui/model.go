@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -167,6 +168,20 @@ func (m Model) SelectedRepoPath() string {
 	return m.selectedRepoPath
 }
 
+// PendingRename returns the BranchRenameInfo for the given worktree path
+// if it is in pending status. Returns nil otherwise.
+func (m Model) PendingRename(worktreePath string) *model.BranchRenameInfo {
+	if m.branchRenames == nil {
+		return nil
+	}
+	for path, info := range m.branchRenames {
+		if path == worktreePath && info.Status == model.RenameStatusPending {
+			return &info
+		}
+	}
+	return nil
+}
+
 func (m Model) Init() tea.Cmd {
 	return fetchGitDataCmd(m.config, m.runner)
 }
@@ -220,10 +235,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				continue
 			}
 			if now-info.CreatedAt > renameTimeoutMs {
+				log.Printf("[branch-rename] timeout: path=%q elapsed=%dms", path, now-info.CreatedAt)
 				info.Status = model.RenameStatusSkipped
 				m.branchRenames[path] = info
 				continue
 			}
+			log.Printf("[branch-rename] polling: path=%q elapsed=%dms", path, now-info.CreatedAt)
 			cmds = append(cmds, checkPromptCmd(m.claudeReader, path, info.CreatedAt))
 		}
 
@@ -237,12 +254,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case WorktreeAddedMsg:
 		m.loading = true
 		if m.branchRenames != nil && msg.WorktreePath != "" {
+			log.Printf("[branch-rename] WorktreeAdded: path=%q branch=%q createdAt=%d", msg.WorktreePath, msg.Branch, msg.CreatedAt)
 			m.branchRenames[msg.WorktreePath] = model.BranchRenameInfo{
 				Status:         model.RenameStatusPending,
 				OriginalBranch: msg.Branch,
 				WorktreePath:   msg.WorktreePath,
 				CreatedAt:      msg.CreatedAt,
 			}
+		} else if m.branchRenames == nil {
+			log.Printf("[branch-rename] WorktreeAdded: feature disabled (branchRenames=nil)")
 		}
 		return m, fetchGitDataCmd(m.config, m.runner)
 
@@ -479,12 +499,13 @@ func (m Model) updateAddWorktreeMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addingWorktree = false
 			m.loading = true
 			m.err = nil
+			repoName := repoNameFromConfig(m.config, m.addingWorktreeRepoPath)
 			if input == "" {
 				// Empty input: create worktree with random branch name
-				return m, addWorktreeCmd(m.runner, m.addingWorktreeRepoPath, m.config.WorktreeBasePath)
+				return m, addWorktreeCmd(m.runner, m.addingWorktreeRepoPath, m.config.WorktreeBasePath, repoName)
 			}
 			// URL input: clone from URL
-			return m, addWorktreeFromURLCmd(m.runner, m.ghRunner, m.addingWorktreeRepoPath, m.config.WorktreeBasePath, input)
+			return m, addWorktreeFromURLCmd(m.runner, m.ghRunner, m.addingWorktreeRepoPath, m.config.WorktreeBasePath, repoName, input)
 		case tea.KeyCtrlC:
 			m.quitting = true
 			return m, tea.Quit
@@ -533,7 +554,7 @@ func (m Model) updateConfirmArchiveMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			item := m.items[m.archiveTarget]
 			m.loading = true
 			m.err = nil
-			return m, archiveWorktreeCmd(m.runner, item.RepoRootPath, item.WorktreePath)
+			return m, archiveWorktreeCmd(m.runner, m.tmuxRunner, item.RepoRootPath, item.WorktreePath)
 		case tea.KeyCtrlC:
 			m.quitting = true
 			return m, tea.Quit
@@ -554,16 +575,37 @@ func (m Model) updateConfirmArchiveMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func archiveWorktreeCmd(runner git.CommandRunner, repoRootPath, worktreePath string) tea.Cmd {
+func archiveWorktreeCmd(runner git.CommandRunner, tmuxRunner tmux.Runner, repoRootPath, worktreePath string) tea.Cmd {
 	return func() tea.Msg {
+		// Kill tmux session first (processes inside worktree would block git worktree remove)
+		sessionName := filepath.Base(worktreePath)
+		if tmuxRunner != nil {
+			tmux.KillSession(tmuxRunner, sessionName) // ignore error (session may not exist)
+		}
+
 		if err := git.RemoveWorktree(runner, repoRootPath, worktreePath); err != nil {
 			return WorktreeArchiveErrMsg{Err: err}
 		}
+
+		// Clean up directory if it still remains
+		if _, err := os.Stat(worktreePath); err == nil {
+			os.RemoveAll(worktreePath)
+		}
+
 		return WorktreeArchivedMsg{}
 	}
 }
 
-func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath string) tea.Cmd {
+func repoNameFromConfig(cfg model.Config, repoPath string) string {
+	for _, repo := range cfg.Repositories {
+		if repo.Path == repoPath {
+			return repo.Name
+		}
+	}
+	return filepath.Base(repoPath)
+}
+
+func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath, repoName string) tea.Cmd {
 	return func() tea.Msg {
 		userName, err := git.GetUserName(runner, repoPath)
 		if err != nil {
@@ -573,8 +615,12 @@ func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath string) tea.Cmd
 		country := git.RandomCountry()
 		slug := git.Slugify(country)
 		branch := userName + "/" + slug
-		newPath := filepath.Join(basePath, slug)
+		newPath := filepath.Join(basePath, repoName, slug)
 		createdAt := time.Now().UnixMilli()
+
+		if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+			return WorktreeAddErrMsg{Err: fmt.Errorf("creating parent directory: %w", err)}
+		}
 
 		if err := git.AddWorktree(runner, repoPath, newPath, branch); err != nil {
 			return WorktreeAddErrMsg{Err: err}
@@ -588,7 +634,7 @@ func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath string) tea.Cmd
 	}
 }
 
-func addWorktreeFromURLCmd(runner git.CommandRunner, ghRunner github.Runner, repoPath, basePath, rawURL string) tea.Cmd {
+func addWorktreeFromURLCmd(runner git.CommandRunner, ghRunner github.Runner, repoPath, basePath, repoName, rawURL string) tea.Cmd {
 	return func() tea.Msg {
 		urlInfo, err := github.ParseGitHubURL(rawURL)
 		if err != nil {
@@ -615,7 +661,11 @@ func addWorktreeFromURLCmd(runner git.CommandRunner, ghRunner github.Runner, rep
 		}
 
 		slug := github.BranchSlug(branch)
-		newPath := filepath.Join(basePath, slug)
+		newPath := filepath.Join(basePath, repoName, slug)
+
+		if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+			return WorktreeAddErrMsg{Err: fmt.Errorf("creating parent directory: %w", err)}
+		}
 
 		if err := git.AddWorktreeFromBranch(runner, repoPath, newPath, branch); err != nil {
 			return WorktreeAddErrMsg{Err: fmt.Errorf("creating worktree: %w", err)}
@@ -633,16 +683,20 @@ func checkPromptCmd(reader claude.Reader, worktreePath string, createdAt int64) 
 	return func() tea.Msg {
 		data, err := reader.ReadHistoryFile()
 		if err != nil {
+			log.Printf("[branch-rename] checkPrompt: ReadHistoryFile error: %v", err)
 			return nil
 		}
 		entries, err := claude.ParseHistory(data)
 		if err != nil {
+			log.Printf("[branch-rename] checkPrompt: ParseHistory error: %v", err)
 			return nil
 		}
 		prompt, sessionID, found := claude.FindFirstPrompt(entries, worktreePath, createdAt)
 		if !found {
+			log.Printf("[branch-rename] checkPrompt: no prompt found for path=%q afterTimestamp=%d (entries=%d)", worktreePath, createdAt, len(entries))
 			return nil
 		}
+		log.Printf("[branch-rename] checkPrompt: found prompt=%q sessionID=%q for path=%q", prompt, sessionID, worktreePath)
 		return BranchRenameStartMsg{
 			WorktreePath: worktreePath,
 			Prompt:       prompt,
@@ -653,13 +707,16 @@ func checkPromptCmd(reader claude.Reader, worktreePath string, createdAt int64) 
 
 func renameBranchCmd(gen branchname.Generator, runner git.CommandRunner, worktreePath, originalBranch, prompt string) tea.Cmd {
 	return func() tea.Msg {
+		log.Printf("[branch-rename] renameBranch: generating name for prompt=%q", prompt)
 		name, err := gen.GenerateBranchName(prompt)
 		if err != nil {
+			log.Printf("[branch-rename] renameBranch: GenerateBranchName error: %v", err)
 			return BranchRenameResultMsg{WorktreePath: worktreePath, Err: err}
 		}
 
 		sanitized := branchname.SanitizeBranchName(name)
 		if sanitized == "" {
+			log.Printf("[branch-rename] renameBranch: SanitizeBranchName returned empty for raw=%q", name)
 			return BranchRenameResultMsg{WorktreePath: worktreePath, Err: fmt.Errorf("generated branch name is empty")}
 		}
 
@@ -669,10 +726,13 @@ func renameBranchCmd(gen branchname.Generator, runner git.CommandRunner, worktre
 			newBranch = parts[0] + "/" + sanitized
 		}
 
+		log.Printf("[branch-rename] renameBranch: renaming %q -> %q in %q", originalBranch, newBranch, worktreePath)
 		if err := git.RenameBranch(runner, worktreePath, originalBranch, newBranch); err != nil {
+			log.Printf("[branch-rename] renameBranch: RenameBranch error: %v", err)
 			return BranchRenameResultMsg{WorktreePath: worktreePath, Err: err}
 		}
 
+		log.Printf("[branch-rename] renameBranch: success %q -> %q", originalBranch, newBranch)
 		return BranchRenameResultMsg{WorktreePath: worktreePath, NewBranch: newBranch}
 	}
 }
