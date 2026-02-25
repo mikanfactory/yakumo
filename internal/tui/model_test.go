@@ -1609,6 +1609,64 @@ func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
 	}
 }
 
+func TestPendingRename_Found(t *testing.T) {
+	m := testModel()
+	m.branchRenames = map[string]model.BranchRenameInfo{
+		"/tmp/shikon/south-korea": {
+			Status:         model.RenameStatusPending,
+			OriginalBranch: "shoji/south-korea",
+			WorktreePath:   "/tmp/shikon/south-korea",
+			CreatedAt:      1000,
+		},
+	}
+
+	info := m.PendingRename("/tmp/shikon/south-korea")
+	if info == nil {
+		t.Fatal("expected non-nil PendingRename result")
+	}
+	if info.OriginalBranch != "shoji/south-korea" {
+		t.Errorf("OriginalBranch = %q, want %q", info.OriginalBranch, "shoji/south-korea")
+	}
+	if info.CreatedAt != 1000 {
+		t.Errorf("CreatedAt = %d, want 1000", info.CreatedAt)
+	}
+}
+
+func TestPendingRename_NotPending(t *testing.T) {
+	m := testModel()
+	m.branchRenames = map[string]model.BranchRenameInfo{
+		"/tmp/shikon/south-korea": {
+			Status:         model.RenameStatusCompleted,
+			OriginalBranch: "shoji/south-korea",
+		},
+	}
+
+	info := m.PendingRename("/tmp/shikon/south-korea")
+	if info != nil {
+		t.Error("expected nil for completed rename")
+	}
+}
+
+func TestPendingRename_NotFound(t *testing.T) {
+	m := testModel()
+	m.branchRenames = map[string]model.BranchRenameInfo{}
+
+	info := m.PendingRename("/tmp/shikon/nonexistent")
+	if info != nil {
+		t.Error("expected nil for missing path")
+	}
+}
+
+func TestPendingRename_NilRenames(t *testing.T) {
+	m := testModel()
+	// branchRenames is nil (feature disabled)
+
+	info := m.PendingRename("/tmp/shikon/south-korea")
+	if info != nil {
+		t.Error("expected nil when branchRenames is nil")
+	}
+}
+
 type fakeRunner struct{}
 
 func (f *fakeRunner) Run(dir string, args ...string) (string, error) {

@@ -167,6 +167,20 @@ func (m Model) SelectedRepoPath() string {
 	return m.selectedRepoPath
 }
 
+// PendingRename returns the BranchRenameInfo for the given worktree path
+// if it is in pending status. Returns nil otherwise.
+func (m Model) PendingRename(worktreePath string) *model.BranchRenameInfo {
+	if m.branchRenames == nil {
+		return nil
+	}
+	for path, info := range m.branchRenames {
+		if path == worktreePath && info.Status == model.RenameStatusPending {
+			return &info
+		}
+	}
+	return nil
+}
+
 func (m Model) Init() tea.Cmd {
 	return fetchGitDataCmd(m.config, m.runner)
 }
