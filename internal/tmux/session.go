@@ -198,8 +198,8 @@ func CreateSessionLayout(runner Runner, sessionName string, startDir string, sta
 	}
 
 	if startupCommand != "" {
-		if err := SendKeys(runner, sessionName+":0", startupCommand); err != nil {
-			return SessionLayout{}, fmt.Errorf("running startup command: %w", err)
+		if _, err := runner.Run("run-shell", "-c", startDir, startupCommand); err != nil {
+			// Non-fatal: startup command failure should not block session creation
 		}
 	}
 
