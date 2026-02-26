@@ -15,6 +15,7 @@ func TestLoadFromFile(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.yaml")
 
 	content := `sidebar_width: 35
+default_base_ref: origin/develop
 repositories:
   - name: myrepo
     path: /home/user/myrepo
@@ -32,6 +33,9 @@ repositories:
 
 	if cfg.SidebarWidth != 35 {
 		t.Errorf("SidebarWidth = %d, want 35", cfg.SidebarWidth)
+	}
+	if cfg.DefaultBaseRef != "origin/develop" {
+		t.Errorf("DefaultBaseRef = %q, want %q", cfg.DefaultBaseRef, "origin/develop")
 	}
 	if len(cfg.Repositories) != 2 {
 		t.Fatalf("len(Repositories) = %d, want 2", len(cfg.Repositories))
@@ -63,6 +67,9 @@ func TestLoadFromFile_DefaultSidebarWidth(t *testing.T) {
 
 	if cfg.SidebarWidth != DefaultSidebarWidth {
 		t.Errorf("SidebarWidth = %d, want default %d", cfg.SidebarWidth, DefaultSidebarWidth)
+	}
+	if cfg.DefaultBaseRef != DefaultBaseRef {
+		t.Errorf("DefaultBaseRef = %q, want %q", cfg.DefaultBaseRef, DefaultBaseRef)
 	}
 }
 
@@ -167,6 +174,9 @@ func TestEnsureDefaultConfig_CreatesFile(t *testing.T) {
 	if !strings.Contains(content, "/home/user/my-repo") {
 		t.Errorf("config should contain repo path, got:\n%s", content)
 	}
+	if !strings.Contains(content, "default_base_ref") {
+		t.Errorf("config should contain default_base_ref, got:\n%s", content)
+	}
 }
 
 func TestEnsureDefaultConfig_AlreadyExists(t *testing.T) {
@@ -228,6 +238,9 @@ func TestEnsureDefaultConfig_NotInGitRepo(t *testing.T) {
 	content := string(data)
 	if !strings.Contains(content, "#") {
 		t.Errorf("config for non-git-repo should be commented out, got:\n%s", content)
+	}
+	if !strings.Contains(content, "# default_base_ref") {
+		t.Errorf("config template should include default_base_ref, got:\n%s", content)
 	}
 }
 

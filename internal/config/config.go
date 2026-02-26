@@ -13,6 +13,7 @@ import (
 )
 
 const DefaultSidebarWidth = 30
+const DefaultBaseRef = "origin/main"
 
 // MaxRbCommands is the maximum number of rb_commands per repository.
 const MaxRbCommands = 3
@@ -31,6 +32,10 @@ func LoadFromFile(path string) (model.Config, error) {
 
 	if cfg.SidebarWidth == 0 {
 		cfg.SidebarWidth = DefaultSidebarWidth
+	}
+
+	if cfg.DefaultBaseRef == "" {
+		cfg.DefaultBaseRef = DefaultBaseRef
 	}
 
 	if cfg.WorktreeBasePath == "" {
@@ -131,10 +136,10 @@ func EnsureDefaultConfig() (string, bool, error) {
 
 	var content string
 	if gitErr == nil {
-		content = fmt.Sprintf("sidebar_width: 30\nworktree_base_path: ~/shikon\n\nrepositories:\n  - name: %s\n    path: %s\n", name, root)
+		content = fmt.Sprintf("sidebar_width: 30\ndefault_base_ref: %s\nworktree_base_path: ~/shikon\n\nrepositories:\n  - name: %s\n    path: %s\n", DefaultBaseRef, name, root)
 		fmt.Fprintf(os.Stderr, "Created default config at %s with repository %q (%s)\n", configPath, name, root)
 	} else {
-		content = "# sidebar_width: 30\n# worktree_base_path: ~/shikon\n#\n# repositories:\n#   - name: my-repo\n#     path: /path/to/my-repo\n"
+		content = "# sidebar_width: 30\n# default_base_ref: origin/main\n# worktree_base_path: ~/shikon\n#\n# repositories:\n#   - name: my-repo\n#     path: /path/to/my-repo\n"
 		fmt.Fprintf(os.Stderr, "Created config template at %s -- edit it to add your repositories\n", configPath)
 	}
 
