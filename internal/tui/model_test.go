@@ -431,7 +431,7 @@ func TestAddWorktreeCmd_Success(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon", "myrepo")
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon", "myrepo", "origin/main")
 	msg := cmd()
 
 	// The command will fail at AddWorktree because FakeCommandRunner won't have
@@ -452,7 +452,7 @@ func TestAddWorktreeCmd_UserNameError(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon", "myrepo")
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon", "myrepo", "origin/main")
 	msg := cmd()
 
 	errMsg, ok := msg.(WorktreeAddErrMsg)
@@ -467,12 +467,13 @@ func TestAddWorktreeCmd_UserNameError(t *testing.T) {
 func TestFetchGitDataCmd_Success(t *testing.T) {
 	runner := git.FakeCommandRunner{
 		Outputs: map[string]string{
-			"/repo:[worktree list --porcelain]": "worktree /repo\nHEAD abc123\nbranch refs/heads/main\n\n",
-			"/repo:[status --porcelain]":        "",
+			"/repo:[worktree list --porcelain]":         "worktree /repo\nHEAD abc123\nbranch refs/heads/main\n\n",
+			"/repo:[diff origin/main...HEAD --numstat]": "",
 		},
 	}
 
 	cfg := model.Config{
+		DefaultBaseRef: "origin/main",
 		Repositories: []model.RepositoryDef{
 			{Name: "test", Path: "/repo"},
 		},
@@ -952,9 +953,9 @@ func TestUpdate_AgentStatusMsg_Empty(t *testing.T) {
 func TestFetchAgentStatusCmd(t *testing.T) {
 	runner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			fmt.Sprintf("%v", []string{"has-session", "-t", "repo1"}):                                                                "",
+			fmt.Sprintf("%v", []string{"has-session", "-t", "repo1"}):                                                                  "",
 			fmt.Sprintf("%v", []string{"list-panes", "-s", "-t", "repo1", "-F", "#{pane_id}\t#{pane_title}\t#{pane_current_command}"}): "%0\t✳ claude\tnode\n",
-			fmt.Sprintf("%v", []string{"capture-pane", "-p", "-t", "%0"}):                                                            "  ❯ ",
+			fmt.Sprintf("%v", []string{"capture-pane", "-p", "-t", "%0"}):                                                              "  ❯ ",
 		},
 		Errors: map[string]error{
 			fmt.Sprintf("%v", []string{"has-session", "-t", "repo1-feat"}): fmt.Errorf("no session"),
@@ -1270,7 +1271,7 @@ func TestRenameBranchCmd_WithTmuxRunner_RenamesSession(t *testing.T) {
 	}
 	tmuxRunner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			"[has-session -t worktree]":                              "",
+			"[has-session -t worktree]":                       "",
 			"[rename-session -t worktree fix-login-redirect]": "",
 		},
 	}
@@ -1314,7 +1315,7 @@ func TestRenameBranchCmd_WithTmuxRunner_ResolvesSlugSession(t *testing.T) {
 	tmuxRunner := &tmux.FakeRunner{
 		Outputs: map[string]string{
 			// directory-based session exists
-			"[has-session -t saint-pierre-and-miquelon]":                  "",
+			"[has-session -t saint-pierre-and-miquelon]":                     "",
 			"[rename-session -t saint-pierre-and-miquelon fix-diffui-error]": "",
 		},
 	}
