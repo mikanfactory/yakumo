@@ -591,8 +591,8 @@ func TestCreateSessionLayout_ListMainPanesError(t *testing.T) {
 
 func TestCreateSessionLayout_WithStartupCommand(t *testing.T) {
 	runner := newFullSessionRunner("feat", "/repos/feat")
-	// Add send-keys for startup command
-	runner.Outputs["[send-keys -t feat:0 npm run dev Enter]"] = ""
+	// Add run-shell for startup command
+	runner.Outputs["[run-shell -c /repos/feat npm run dev]"] = ""
 
 	layout, err := CreateSessionLayout(runner, "feat", "/repos/feat", "npm run dev")
 	if err != nil {
@@ -603,25 +603,25 @@ func TestCreateSessionLayout_WithStartupCommand(t *testing.T) {
 		t.Errorf("Center1.PaneID = %q, want %%0", layout.Center1.PaneID)
 	}
 
-	// Verify send-keys was called before rename-window (split)
-	sendKeysIdx := -1
+	// Verify run-shell was called before rename-window (split)
+	runShellIdx := -1
 	renameIdx := -1
 	for i, call := range runner.Calls {
-		if len(call) >= 2 && call[0] == "send-keys" && call[2] == "feat:0" {
-			sendKeysIdx = i
+		if len(call) >= 1 && call[0] == "run-shell" {
+			runShellIdx = i
 		}
 		if len(call) >= 1 && call[0] == "rename-window" {
 			renameIdx = i
 		}
 	}
-	if sendKeysIdx == -1 {
-		t.Fatal("expected send-keys call for startup command")
+	if runShellIdx == -1 {
+		t.Fatal("expected run-shell call for startup command")
 	}
 	if renameIdx == -1 {
 		t.Fatal("expected rename-window call")
 	}
-	if sendKeysIdx >= renameIdx {
-		t.Errorf("send-keys (idx=%d) should be called before rename-window (idx=%d)", sendKeysIdx, renameIdx)
+	if runShellIdx >= renameIdx {
+		t.Errorf("run-shell (idx=%d) should be called before rename-window (idx=%d)", runShellIdx, renameIdx)
 	}
 }
 
@@ -633,10 +633,10 @@ func TestCreateSessionLayout_EmptyStartupCommand(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify no send-keys was called
+	// Verify no run-shell was called
 	for _, call := range runner.Calls {
-		if call[0] == "send-keys" {
-			t.Error("should not call send-keys when startup command is empty")
+		if call[0] == "run-shell" {
+			t.Error("should not call run-shell when startup command is empty")
 		}
 	}
 }

@@ -342,7 +342,7 @@ func TestZoneID(t *testing.T) {
 
 func TestUpdate_Enter_AddWorktree_EntersInputMode(t *testing.T) {
 	m := testModel()
-	m.config = model.Config{WorktreeBasePath: "/tmp/shikon"}
+	m.config = model.Config{WorktreeBasePath: "/tmp/yakumo"}
 
 	// Navigate to "Add worktree" item
 	for i, item := range m.items {
@@ -431,7 +431,7 @@ func TestAddWorktreeCmd_Success(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon", "myrepo", "origin/main")
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/yakumo", "myrepo", "origin/main")
 	msg := cmd()
 
 	// The command will fail at AddWorktree because FakeCommandRunner won't have
@@ -452,7 +452,7 @@ func TestAddWorktreeCmd_UserNameError(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeCmd(runner, "/repo", "/tmp/shikon", "myrepo", "origin/main")
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/yakumo", "myrepo", "origin/main")
 	msg := cmd()
 
 	errMsg, ok := msg.(WorktreeAddErrMsg)
@@ -999,7 +999,7 @@ func TestUpdate_WorktreeAddedMsg_RegistersRename(t *testing.T) {
 	m.branchNameGen = branchname.FakeGenerator{Result: "test-branch"}
 
 	msg := WorktreeAddedMsg{
-		WorktreePath: "/tmp/shikon/south-korea",
+		WorktreePath: "/tmp/yakumo/south-korea",
 		Branch:       "shoji/south-korea",
 		CreatedAt:    1000,
 	}
@@ -1014,7 +1014,7 @@ func TestUpdate_WorktreeAddedMsg_RegistersRename(t *testing.T) {
 		t.Error("expected fetchGitDataCmd to be returned")
 	}
 
-	info, ok := updated.branchRenames["/tmp/shikon/south-korea"]
+	info, ok := updated.branchRenames["/tmp/yakumo/south-korea"]
 	if !ok {
 		t.Fatal("expected branchRenames to contain the worktree path")
 	}
@@ -1035,7 +1035,7 @@ func TestUpdate_WorktreeAddedMsg_NilRenames(t *testing.T) {
 	// branchRenames is nil (feature disabled)
 
 	msg := WorktreeAddedMsg{
-		WorktreePath: "/tmp/shikon/south-korea",
+		WorktreePath: "/tmp/yakumo/south-korea",
 		Branch:       "shoji/south-korea",
 		CreatedAt:    1000,
 	}
@@ -1671,7 +1671,7 @@ func TestUpdate_AddWorktreeMode_Enter_Empty_CreatesRandom(t *testing.T) {
 	m.addingWorktree = true
 	m.addingWorktreeRepoPath = "/code/repo1"
 	m.config = model.Config{
-		WorktreeBasePath: "/tmp/shikon",
+		WorktreeBasePath: "/tmp/yakumo",
 		Repositories:     []model.RepositoryDef{{Name: "repo1", Path: "/code/repo1"}},
 	}
 
@@ -1694,7 +1694,7 @@ func TestUpdate_AddWorktreeMode_Enter_URL_ClonesFromURL(t *testing.T) {
 	m.addingWorktree = true
 	m.addingWorktreeRepoPath = "/code/repo1"
 	m.config = model.Config{
-		WorktreeBasePath: "/tmp/shikon",
+		WorktreeBasePath: "/tmp/yakumo",
 		Repositories:     []model.RepositoryDef{{Name: "repo1", Path: "/code/repo1"}},
 	}
 	m.textInput.SetValue("https://github.com/owner/repo/tree/feature/my-branch")
@@ -1729,9 +1729,11 @@ func TestUpdate_AddWorktreeMode_CtrlC_Quits(t *testing.T) {
 }
 
 func TestAddWorktreeFromURLCmd_BranchURL(t *testing.T) {
+	basePath := t.TempDir()
 	branch := "feature/my-branch"
+	wantPath := filepath.Join(basePath, "myrepo", "my-branch")
 	fetchKey := fmt.Sprintf("/repo:%v", []string{"fetch", "origin", branch})
-	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/myrepo/my-branch", branch})
+	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", wantPath, branch})
 
 	runner := git.FakeCommandRunner{
 		Outputs: map[string]string{
@@ -1740,7 +1742,7 @@ func TestAddWorktreeFromURLCmd_BranchURL(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "myrepo", "https://github.com/owner/repo/tree/feature/my-branch")
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", basePath, "myrepo", "https://github.com/owner/repo/tree/feature/my-branch")
 	msg := cmd()
 
 	addedMsg, ok := msg.(WorktreeAddedMsg)
@@ -1750,15 +1752,15 @@ func TestAddWorktreeFromURLCmd_BranchURL(t *testing.T) {
 	if addedMsg.Branch != branch {
 		t.Errorf("Branch = %q, want %q", addedMsg.Branch, branch)
 	}
-	if addedMsg.WorktreePath != "/tmp/shikon/myrepo/my-branch" {
-		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/myrepo/my-branch")
+	if addedMsg.WorktreePath != wantPath {
+		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, wantPath)
 	}
 }
 
 func TestAddWorktreeFromURLCmd_InvalidURL(t *testing.T) {
 	runner := git.FakeCommandRunner{}
 
-	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "myrepo", "not-a-url")
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/yakumo", "myrepo", "not-a-url")
 	msg := cmd()
 
 	_, ok := msg.(WorktreeAddErrMsg)
@@ -1770,7 +1772,7 @@ func TestAddWorktreeFromURLCmd_InvalidURL(t *testing.T) {
 func TestAddWorktreeFromURLCmd_PR_NoGhRunner(t *testing.T) {
 	runner := git.FakeCommandRunner{}
 
-	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/shikon", "myrepo", "https://github.com/owner/repo/pull/42")
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/yakumo", "myrepo", "https://github.com/owner/repo/pull/42")
 	msg := cmd()
 
 	errMsg, ok := msg.(WorktreeAddErrMsg)
@@ -1783,11 +1785,13 @@ func TestAddWorktreeFromURLCmd_PR_NoGhRunner(t *testing.T) {
 }
 
 func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
+	basePath := t.TempDir()
 	prURL := "https://github.com/owner/repo/pull/42"
 	ghKey := fmt.Sprintf("/repo:%v", []string{"pr", "view", prURL, "--json", "headRefName"})
 	branch := "feature/from-pr"
+	wantPath := filepath.Join(basePath, "myrepo", "from-pr")
 	fetchKey := fmt.Sprintf("/repo:%v", []string{"fetch", "origin", branch})
-	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", "/tmp/shikon/myrepo/from-pr", branch})
+	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", wantPath, branch})
 
 	gitRunner := git.FakeCommandRunner{
 		Outputs: map[string]string{
@@ -1801,7 +1805,7 @@ func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
 		},
 	}
 
-	cmd := addWorktreeFromURLCmd(gitRunner, ghRunner, "/repo", "/tmp/shikon", "myrepo", prURL)
+	cmd := addWorktreeFromURLCmd(gitRunner, ghRunner, "/repo", basePath, "myrepo", prURL)
 	msg := cmd()
 
 	addedMsg, ok := msg.(WorktreeAddedMsg)
@@ -1811,23 +1815,23 @@ func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
 	if addedMsg.Branch != branch {
 		t.Errorf("Branch = %q, want %q", addedMsg.Branch, branch)
 	}
-	if addedMsg.WorktreePath != "/tmp/shikon/myrepo/from-pr" {
-		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, "/tmp/shikon/myrepo/from-pr")
+	if addedMsg.WorktreePath != wantPath {
+		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, wantPath)
 	}
 }
 
 func TestPendingRename_Found(t *testing.T) {
 	m := testModel()
 	m.branchRenames = map[string]model.BranchRenameInfo{
-		"/tmp/shikon/south-korea": {
+		"/tmp/yakumo/south-korea": {
 			Status:         model.RenameStatusPending,
 			OriginalBranch: "shoji/south-korea",
-			WorktreePath:   "/tmp/shikon/south-korea",
+			WorktreePath:   "/tmp/yakumo/south-korea",
 			CreatedAt:      1000,
 		},
 	}
 
-	info := m.PendingRename("/tmp/shikon/south-korea")
+	info := m.PendingRename("/tmp/yakumo/south-korea")
 	if info == nil {
 		t.Fatal("expected non-nil PendingRename result")
 	}
@@ -1842,13 +1846,13 @@ func TestPendingRename_Found(t *testing.T) {
 func TestPendingRename_NotPending(t *testing.T) {
 	m := testModel()
 	m.branchRenames = map[string]model.BranchRenameInfo{
-		"/tmp/shikon/south-korea": {
+		"/tmp/yakumo/south-korea": {
 			Status:         model.RenameStatusCompleted,
 			OriginalBranch: "shoji/south-korea",
 		},
 	}
 
-	info := m.PendingRename("/tmp/shikon/south-korea")
+	info := m.PendingRename("/tmp/yakumo/south-korea")
 	if info != nil {
 		t.Error("expected nil for completed rename")
 	}
@@ -1858,7 +1862,7 @@ func TestPendingRename_NotFound(t *testing.T) {
 	m := testModel()
 	m.branchRenames = map[string]model.BranchRenameInfo{}
 
-	info := m.PendingRename("/tmp/shikon/nonexistent")
+	info := m.PendingRename("/tmp/yakumo/nonexistent")
 	if info != nil {
 		t.Error("expected nil for missing path")
 	}
@@ -1868,7 +1872,7 @@ func TestPendingRename_NilRenames(t *testing.T) {
 	m := testModel()
 	// branchRenames is nil (feature disabled)
 
-	info := m.PendingRename("/tmp/shikon/south-korea")
+	info := m.PendingRename("/tmp/yakumo/south-korea")
 	if info != nil {
 		t.Error("expected nil when branchRenames is nil")
 	}
@@ -1878,4 +1882,107 @@ type fakeRunner struct{}
 
 func (f *fakeRunner) Run(dir string, args ...string) (string, error) {
 	return "", nil
+}
+
+func addRepoModel() Model {
+	ti := textinput.New()
+	ti.ShowSuggestions = true
+	ti.Focus()
+	return Model{
+		addingRepo: true,
+		textInput:  ti,
+	}
+}
+
+func TestUpdateAddRepoMode_PathSuggestionsMsg_Applied(t *testing.T) {
+	m := addRepoModel()
+	m.textInput.SetValue("/usr/")
+	m.lastSuggestionDir = "/usr/"
+
+	homeDir, _ := os.UserHomeDir()
+	_ = homeDir
+
+	result, _ := m.Update(PathSuggestionsMsg{
+		Suggestions: []string{"/usr/local/", "/usr/lib/"},
+		ForDir:      "/usr/",
+	})
+	updated := result.(Model)
+
+	// After applying suggestions, the textinput should have suggestions set.
+	// We verify by checking that the model processed without error.
+	if updated.err != nil {
+		t.Errorf("unexpected error: %v", updated.err)
+	}
+}
+
+func TestUpdateAddRepoMode_PathSuggestionsMsg_Discarded(t *testing.T) {
+	m := addRepoModel()
+	// User has typed further into /usr/local/ but the msg is stale (for /usr/)
+	m.textInput.SetValue("/usr/local/")
+	m.lastSuggestionDir = "/usr/local/"
+
+	result, _ := m.Update(PathSuggestionsMsg{
+		Suggestions: []string{"/usr/lib/", "/usr/local/"},
+		ForDir:      "/usr/",
+	})
+	updated := result.(Model)
+
+	if updated.err != nil {
+		t.Errorf("unexpected error: %v", updated.err)
+	}
+}
+
+func TestUpdateAddRepoMode_Escape_ClearsSuggestions(t *testing.T) {
+	m := addRepoModel()
+	m.textInput.SetValue("/usr/")
+	m.lastSuggestionDir = "/usr/"
+	m.textInput.SetSuggestions([]string{"/usr/local/", "/usr/lib/"})
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated := result.(Model)
+
+	if updated.addingRepo {
+		t.Error("addingRepo should be false after escape")
+	}
+	if updated.lastSuggestionDir != "" {
+		t.Errorf("lastSuggestionDir should be empty, got %q", updated.lastSuggestionDir)
+	}
+	if updated.textInput.Value() != "" {
+		t.Errorf("textInput value should be empty, got %q", updated.textInput.Value())
+	}
+}
+
+func TestUpdateAddRepoMode_DirChange_TriggersFetch(t *testing.T) {
+	m := addRepoModel()
+	m.textInput.SetValue("/usr/")
+	m.textInput.SetCursor(len("/usr/"))
+	m.lastSuggestionDir = "/" // pretend we previously fetched "/"
+
+	// Typing "l" appends to make "/usr/l"
+	// ExtractDir("/usr/l") = "/usr/" which differs from lastSuggestionDir "/"
+	// So a fetch command should be returned
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	updated := result.(Model)
+
+	if updated.lastSuggestionDir != "/usr/" {
+		t.Errorf("lastSuggestionDir should be /usr/, got %q", updated.lastSuggestionDir)
+	}
+	if cmd == nil {
+		t.Error("expected a command to be returned for fetching suggestions")
+	}
+}
+
+func TestUpdateAddRepoMode_SameDirTyping_NoFetch(t *testing.T) {
+	m := addRepoModel()
+	m.textInput.SetValue("/usr/lo")
+	m.textInput.SetCursor(len("/usr/lo"))
+	m.lastSuggestionDir = "/usr/"
+
+	// Typing "c" makes it "/usr/loc" — same dir /usr/, no fetch needed
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	updated := result.(Model)
+
+	if updated.lastSuggestionDir != "/usr/" {
+		t.Errorf("lastSuggestionDir should remain /usr/, got %q", updated.lastSuggestionDir)
+	}
 }

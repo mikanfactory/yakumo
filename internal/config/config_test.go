@@ -353,7 +353,7 @@ func TestAppendRepository_Success(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.yaml")
 
 	content := `sidebar_width: 30
-worktree_base_path: ~/shikon
+worktree_base_path: ~/yakumo
 
 repositories:
   - name: existing-repo
@@ -514,7 +514,7 @@ func TestLoadFromFile_TildeExpansion(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
 
-	content := `worktree_base_path: ~/shikon
+	content := `worktree_base_path: ~/yakumo
 repositories:
   - name: myrepo
     path: /home/user/myrepo
@@ -528,7 +528,7 @@ repositories:
 		t.Fatalf("LoadFromFile failed: %v", err)
 	}
 
-	want := filepath.Join(tmpHome, "shikon")
+	want := filepath.Join(tmpHome, "yakumo")
 	if cfg.WorktreeBasePath != want {
 		t.Errorf("WorktreeBasePath = %q, want %q", cfg.WorktreeBasePath, want)
 	}
@@ -538,7 +538,7 @@ func TestLoadFromFile_TildeExpansion_AbsolutePathUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
 
-	content := `worktree_base_path: /absolute/path/shikon
+	content := `worktree_base_path: /absolute/path/yakumo
 repositories:
   - name: myrepo
     path: /home/user/myrepo
@@ -552,8 +552,8 @@ repositories:
 		t.Fatalf("LoadFromFile failed: %v", err)
 	}
 
-	if cfg.WorktreeBasePath != "/absolute/path/shikon" {
-		t.Errorf("WorktreeBasePath = %q, want %q", cfg.WorktreeBasePath, "/absolute/path/shikon")
+	if cfg.WorktreeBasePath != "/absolute/path/yakumo" {
+		t.Errorf("WorktreeBasePath = %q, want %q", cfg.WorktreeBasePath, "/absolute/path/yakumo")
 	}
 }
 

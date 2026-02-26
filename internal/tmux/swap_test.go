@@ -53,6 +53,8 @@ func TestCurrentSessionName(t *testing.T) {
 }
 
 func TestSwapCenter(t *testing.T) {
+	t.Setenv("TMUX_PANE", "")
+
 	t.Run("success", func(t *testing.T) {
 		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{
@@ -123,6 +125,8 @@ func TestSwapCenter(t *testing.T) {
 }
 
 func TestSwapRightBelow(t *testing.T) {
+	t.Setenv("TMUX_PANE", "")
+
 	t.Run("success", func(t *testing.T) {
 		t.Setenv("TMUX_PANE", "")
 		runner := &FakeRunner{

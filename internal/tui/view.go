@@ -170,7 +170,7 @@ func renderAddRepoView(m Model) string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("enter: confirm  esc: cancel"))
+	b.WriteString(helpStyle.Render("enter: confirm  tab: complete  esc: cancel"))
 
 	return b.String()
 }

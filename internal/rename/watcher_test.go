@@ -27,7 +27,7 @@ func makeHistory(project, display string, timestamp int64) []byte {
 }
 
 func TestWatcher_Run_Success(t *testing.T) {
-	wtPath := "/Users/shoji/shikon/south-korea"
+	wtPath := "/Users/shoji/yakumo/south-korea"
 	createdAt := time.Now().UnixMilli()
 
 	historyData := makeHistory(wtPath, "add user authentication with JWT tokens", createdAt+1000)
@@ -61,7 +61,7 @@ func TestWatcher_Run_Timeout(t *testing.T) {
 	runner := git.FakeCommandRunner{Outputs: map[string]string{}}
 
 	cfg := WatcherConfig{
-		WorktreePath: "/Users/shoji/shikon/south-korea",
+		WorktreePath: "/Users/shoji/yakumo/south-korea",
 		Branch:       "shoji/south-korea",
 		CreatedAt:    time.Now().UnixMilli(),
 		PollInterval: 10 * time.Millisecond,
@@ -79,7 +79,7 @@ func TestWatcher_Run_Timeout(t *testing.T) {
 }
 
 func TestWatcher_Run_LLMError(t *testing.T) {
-	wtPath := "/Users/shoji/shikon/south-korea"
+	wtPath := "/Users/shoji/yakumo/south-korea"
 	createdAt := time.Now().UnixMilli()
 
 	historyData := makeHistory(wtPath, "implement user dashboard with charts", createdAt+1000)
@@ -107,7 +107,7 @@ func TestWatcher_Run_LLMError(t *testing.T) {
 }
 
 func TestWatcher_Run_RenameError(t *testing.T) {
-	wtPath := "/Users/shoji/shikon/south-korea"
+	wtPath := "/Users/shoji/yakumo/south-korea"
 	createdAt := time.Now().UnixMilli()
 
 	historyData := makeHistory(wtPath, "fix the login redirect bug in auth module", createdAt+1000)
@@ -139,7 +139,7 @@ func TestWatcher_Run_RenameError(t *testing.T) {
 }
 
 func TestWatcher_Run_PreservesPrefix(t *testing.T) {
-	wtPath := "/Users/shoji/shikon/south-korea"
+	wtPath := "/Users/shoji/yakumo/south-korea"
 	createdAt := time.Now().UnixMilli()
 
 	historyData := makeHistory(wtPath, "refactor database connection pooling logic", createdAt+1000)
@@ -169,7 +169,7 @@ func TestWatcher_Run_PreservesPrefix(t *testing.T) {
 }
 
 func TestWatcher_Run_NoPrefixBranch(t *testing.T) {
-	wtPath := "/Users/shoji/shikon/south-korea"
+	wtPath := "/Users/shoji/yakumo/south-korea"
 	createdAt := time.Now().UnixMilli()
 
 	historyData := makeHistory(wtPath, "add dark mode support to settings page", createdAt+1000)
@@ -199,7 +199,7 @@ func TestWatcher_Run_NoPrefixBranch(t *testing.T) {
 }
 
 func TestWatcher_Run_EmptyBranchName(t *testing.T) {
-	wtPath := "/Users/shoji/shikon/south-korea"
+	wtPath := "/Users/shoji/yakumo/south-korea"
 	createdAt := time.Now().UnixMilli()
 
 	historyData := makeHistory(wtPath, "do something with the codebase", createdAt+1000)
@@ -227,7 +227,7 @@ func TestWatcher_Run_EmptyBranchName(t *testing.T) {
 }
 
 func TestWatcher_Run_LogsProgress(t *testing.T) {
-	wtPath := "/Users/shoji/shikon/south-korea"
+	wtPath := "/Users/shoji/yakumo/south-korea"
 	createdAt := time.Now().UnixMilli()
 
 	historyData := makeHistory(wtPath, "add user authentication with JWT tokens", createdAt+1000)
@@ -301,7 +301,7 @@ func TestWatcher_FindPrompt_LogsErrors(t *testing.T) {
 }
 
 func TestWatcher_Run_SkipsShortPrompts(t *testing.T) {
-	wtPath := "/Users/shoji/shikon/south-korea"
+	wtPath := "/Users/shoji/yakumo/south-korea"
 	createdAt := time.Now().UnixMilli()
 
 	// Only short prompts - should timeout since no meaningful prompt found
