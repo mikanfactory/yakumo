@@ -19,6 +19,7 @@ import (
 	"github.com/mikanfactory/yakumo/internal/git"
 	"github.com/mikanfactory/yakumo/internal/github"
 	"github.com/mikanfactory/yakumo/internal/model"
+	"github.com/mikanfactory/yakumo/internal/pathcomplete"
 	"github.com/mikanfactory/yakumo/internal/sidebar"
 	"github.com/mikanfactory/yakumo/internal/tmux"
 )
@@ -78,6 +79,12 @@ type AgentStatusMsg struct {
 	Statuses map[string][]model.AgentInfo
 }
 
+// PathSuggestionsMsg delivers directory completion candidates for the add-repo text input.
+type PathSuggestionsMsg struct {
+	Suggestions []string
+	ForDir      string
+}
+
 // RepoAddedMsg is sent when a repository has been added to config.
 type RepoAddedMsg struct{}
 
@@ -124,6 +131,7 @@ type Model struct {
 	branchRenames            map[string]model.BranchRenameInfo
 	claudeReader             claude.Reader
 	branchNameGen            branchname.Generator
+	lastSuggestionDir        string
 	confirmingArchive        bool
 	archiveTarget            int
 	agentTickRunning         bool
@@ -138,6 +146,7 @@ func NewModel(cfg model.Config, runner git.CommandRunner, configPath string, tmu
 	ti.Placeholder = "/path/to/repository"
 	ti.CharLimit = 256
 	ti.Width = 50
+	ti.ShowSuggestions = true
 
 	var renames map[string]model.BranchRenameInfo
 	if claudeReader != nil && branchNameGen != nil {
@@ -435,6 +444,8 @@ func (m Model) updateAddRepoMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEscape:
 			m.addingRepo = false
 			m.textInput.SetValue("")
+			m.textInput.SetSuggestions(nil)
+			m.lastSuggestionDir = ""
 			m.err = nil
 			return m, nil
 		case tea.KeyEnter:
@@ -443,6 +454,8 @@ func (m Model) updateAddRepoMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = fmt.Errorf("path cannot be empty")
 				return m, nil
 			}
+			m.textInput.SetSuggestions(nil)
+			m.lastSuggestionDir = ""
 			m.loading = true
 			m.err = nil
 			return m, validateRepoCmd(m.runner, path)
@@ -450,6 +463,14 @@ func (m Model) updateAddRepoMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
+
+	case PathSuggestionsMsg:
+		homeDir, _ := os.UserHomeDir()
+		currentDir := pathcomplete.ExtractDir(m.textInput.Value(), homeDir)
+		if msg.ForDir == currentDir {
+			m.textInput.SetSuggestions(msg.Suggestions)
+		}
+		return m, nil
 
 	case RepoValidatedMsg:
 		m.loading = true
@@ -471,6 +492,8 @@ func (m Model) updateAddRepoMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.config = cfg
 		m.addingRepo = false
 		m.textInput.SetValue("")
+		m.textInput.SetSuggestions(nil)
+		m.lastSuggestionDir = ""
 		m.loading = true
 		return m, fetchGitDataCmd(m.config, m.runner)
 
@@ -482,9 +505,36 @@ func (m Model) updateAddRepoMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Delegate to textinput
+	prevValue := m.textInput.Value()
 	var cmd tea.Cmd
 	m.textInput, cmd = m.textInput.Update(msg)
+	newValue := m.textInput.Value()
+
+	// Check if the directory portion changed; if so, fetch new suggestions.
+	if newValue != prevValue {
+		homeDir, _ := os.UserHomeDir()
+		newDir := pathcomplete.ExtractDir(newValue, homeDir)
+		if newDir != m.lastSuggestionDir {
+			m.lastSuggestionDir = newDir
+			return m, tea.Batch(cmd, fetchPathSuggestionsCmd(newValue))
+		}
+	}
+
 	return m, cmd
+}
+
+const maxPathSuggestions = 50
+
+func fetchPathSuggestionsCmd(input string) tea.Cmd {
+	return func() tea.Msg {
+		homeDir, _ := os.UserHomeDir()
+		dir := pathcomplete.ExtractDir(input, homeDir)
+		suggestions := pathcomplete.ListDirSuggestions(input, homeDir, pathcomplete.DefaultDirLister, maxPathSuggestions)
+		return PathSuggestionsMsg{
+			Suggestions: suggestions,
+			ForDir:      dir,
+		}
+	}
 }
 
 func (m Model) updateAddWorktreeMode(msg tea.Msg) (tea.Model, tea.Cmd) {

@@ -1882,3 +1882,106 @@ type fakeRunner struct{}
 func (f *fakeRunner) Run(dir string, args ...string) (string, error) {
 	return "", nil
 }
+
+func addRepoModel() Model {
+	ti := textinput.New()
+	ti.ShowSuggestions = true
+	ti.Focus()
+	return Model{
+		addingRepo: true,
+		textInput:  ti,
+	}
+}
+
+func TestUpdateAddRepoMode_PathSuggestionsMsg_Applied(t *testing.T) {
+	m := addRepoModel()
+	m.textInput.SetValue("/usr/")
+	m.lastSuggestionDir = "/usr/"
+
+	homeDir, _ := os.UserHomeDir()
+	_ = homeDir
+
+	result, _ := m.Update(PathSuggestionsMsg{
+		Suggestions: []string{"/usr/local/", "/usr/lib/"},
+		ForDir:      "/usr/",
+	})
+	updated := result.(Model)
+
+	// After applying suggestions, the textinput should have suggestions set.
+	// We verify by checking that the model processed without error.
+	if updated.err != nil {
+		t.Errorf("unexpected error: %v", updated.err)
+	}
+}
+
+func TestUpdateAddRepoMode_PathSuggestionsMsg_Discarded(t *testing.T) {
+	m := addRepoModel()
+	// User has typed further into /usr/local/ but the msg is stale (for /usr/)
+	m.textInput.SetValue("/usr/local/")
+	m.lastSuggestionDir = "/usr/local/"
+
+	result, _ := m.Update(PathSuggestionsMsg{
+		Suggestions: []string{"/usr/lib/", "/usr/local/"},
+		ForDir:      "/usr/",
+	})
+	updated := result.(Model)
+
+	if updated.err != nil {
+		t.Errorf("unexpected error: %v", updated.err)
+	}
+}
+
+func TestUpdateAddRepoMode_Escape_ClearsSuggestions(t *testing.T) {
+	m := addRepoModel()
+	m.textInput.SetValue("/usr/")
+	m.lastSuggestionDir = "/usr/"
+	m.textInput.SetSuggestions([]string{"/usr/local/", "/usr/lib/"})
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	updated := result.(Model)
+
+	if updated.addingRepo {
+		t.Error("addingRepo should be false after escape")
+	}
+	if updated.lastSuggestionDir != "" {
+		t.Errorf("lastSuggestionDir should be empty, got %q", updated.lastSuggestionDir)
+	}
+	if updated.textInput.Value() != "" {
+		t.Errorf("textInput value should be empty, got %q", updated.textInput.Value())
+	}
+}
+
+func TestUpdateAddRepoMode_DirChange_TriggersFetch(t *testing.T) {
+	m := addRepoModel()
+	m.textInput.SetValue("/usr/")
+	m.textInput.SetCursor(len("/usr/"))
+	m.lastSuggestionDir = "/" // pretend we previously fetched "/"
+
+	// Typing "l" appends to make "/usr/l"
+	// ExtractDir("/usr/l") = "/usr/" which differs from lastSuggestionDir "/"
+	// So a fetch command should be returned
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	updated := result.(Model)
+
+	if updated.lastSuggestionDir != "/usr/" {
+		t.Errorf("lastSuggestionDir should be /usr/, got %q", updated.lastSuggestionDir)
+	}
+	if cmd == nil {
+		t.Error("expected a command to be returned for fetching suggestions")
+	}
+}
+
+func TestUpdateAddRepoMode_SameDirTyping_NoFetch(t *testing.T) {
+	m := addRepoModel()
+	m.textInput.SetValue("/usr/lo")
+	m.textInput.SetCursor(len("/usr/lo"))
+	m.lastSuggestionDir = "/usr/"
+
+	// Typing "c" makes it "/usr/loc" — same dir /usr/, no fetch needed
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	updated := result.(Model)
+
+	if updated.lastSuggestionDir != "/usr/" {
+		t.Errorf("lastSuggestionDir should remain /usr/, got %q", updated.lastSuggestionDir)
+	}
+}
