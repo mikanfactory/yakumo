@@ -162,7 +162,7 @@ func TestAddWorktree(t *testing.T) {
 		},
 	}
 
-	err := AddWorktree(runner, "/repo", "/tmp/new-worktree", "user/feature")
+	err := AddWorktree(runner, "/repo", "/tmp/new-worktree", "user/feature", "origin/main")
 	if err != nil {
 		t.Fatalf("AddWorktree failed: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestAddWorktree_Error(t *testing.T) {
 		Outputs: map[string]string{},
 	}
 
-	err := AddWorktree(runner, "/repo", "/tmp/new-worktree", "user/feature")
+	err := AddWorktree(runner, "/repo", "/tmp/new-worktree", "user/feature", "origin/main")
 	if err == nil {
 		t.Error("expected error, got nil")
 	}
