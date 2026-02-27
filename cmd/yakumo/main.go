@@ -22,6 +22,7 @@ import (
 	"github.com/mikanfactory/yakumo/internal/github"
 	"github.com/mikanfactory/yakumo/internal/model"
 	"github.com/mikanfactory/yakumo/internal/rename"
+	"github.com/mikanfactory/yakumo/internal/timeparse"
 	"github.com/mikanfactory/yakumo/internal/tmux"
 	"github.com/mikanfactory/yakumo/internal/tui"
 )
@@ -309,7 +310,7 @@ func resolveWatchRenameArgs(
 
 	// Resolve created-at
 	if rawCreatedAt != "" {
-		v, err := strconv.ParseInt(rawCreatedAt, 10, 64)
+		v, err := timeparse.ParseCreatedAt(rawCreatedAt, time.Now())
 		if err != nil {
 			return args, fmt.Errorf("invalid --created-at: %w", err)
 		}
@@ -365,7 +366,7 @@ func runWatchRename() {
 	fs := flag.NewFlagSet("watch-rename", flag.ExitOnError)
 	wtPath := fs.String("path", "", "absolute path to the worktree (default: current directory)")
 	branch := fs.String("branch", "", "original branch name (default: current git branch)")
-	createdAtStr := fs.String("created-at", "", "unix millisecond timestamp (default: now)")
+	createdAtStr := fs.String("created-at", "", "unix millisecond timestamp or relative duration (e.g., 10m, 1h) (default: now)")
 	sessionName := fs.String("session-name", "", "tmux session name (default: current tmux session)")
 	fs.Parse(os.Args[2:])
 
