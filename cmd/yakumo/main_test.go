@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mikanfactory/yakumo/internal/git"
 	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
@@ -116,6 +117,169 @@ func TestFindIdleBackgroundPane(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveWatchRenameArgs(t *testing.T) {
+	t.Run("all flags explicit", func(t *testing.T) {
+		args, err := resolveWatchRenameArgs(
+			"/tmp/wt", "main", "1234567890", "my-session",
+			git.FakeCommandRunner{Outputs: map[string]string{}}, nil,
+			func() (string, error) { return "", nil },
+			func() int64 { return 0 },
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if args.wtPath != "/tmp/wt" {
+			t.Errorf("wtPath = %q, want %q", args.wtPath, "/tmp/wt")
+		}
+		if args.branch != "main" {
+			t.Errorf("branch = %q, want %q", args.branch, "main")
+		}
+		if args.createdAt != 1234567890 {
+			t.Errorf("createdAt = %d, want %d", args.createdAt, 1234567890)
+		}
+		if args.sessionName != "my-session" {
+			t.Errorf("sessionName = %q, want %q", args.sessionName, "my-session")
+		}
+	})
+
+	t.Run("path unspecified uses getwd", func(t *testing.T) {
+		args, err := resolveWatchRenameArgs(
+			"", "main", "1234567890", "my-session",
+			git.FakeCommandRunner{Outputs: map[string]string{}}, nil,
+			func() (string, error) { return "/home/user/project", nil },
+			func() int64 { return 0 },
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if args.wtPath != "/home/user/project" {
+			t.Errorf("wtPath = %q, want %q", args.wtPath, "/home/user/project")
+		}
+	})
+
+	t.Run("path unspecified and getwd fails", func(t *testing.T) {
+		_, err := resolveWatchRenameArgs(
+			"", "main", "1234567890", "my-session",
+			git.FakeCommandRunner{Outputs: map[string]string{}}, nil,
+			func() (string, error) { return "", fmt.Errorf("getwd failed") },
+			func() int64 { return 0 },
+		)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "resolving working directory") {
+			t.Errorf("error = %q, want to contain %q", err.Error(), "resolving working directory")
+		}
+	})
+
+	t.Run("branch unspecified uses git", func(t *testing.T) {
+		gitRunner := git.FakeCommandRunner{
+			Outputs: map[string]string{
+				"/tmp/wt:[symbolic-ref --short HEAD]": "feature/test\n",
+			},
+		}
+		args, err := resolveWatchRenameArgs(
+			"/tmp/wt", "", "1234567890", "my-session",
+			gitRunner, nil,
+			func() (string, error) { return "", nil },
+			func() int64 { return 0 },
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if args.branch != "feature/test" {
+			t.Errorf("branch = %q, want %q", args.branch, "feature/test")
+		}
+	})
+
+	t.Run("branch unspecified and git fails", func(t *testing.T) {
+		gitRunner := git.FakeCommandRunner{
+			Outputs: map[string]string{},
+			Errors: map[string]error{
+				"/tmp/wt:[symbolic-ref --short HEAD]": fmt.Errorf("not a git repo"),
+			},
+		}
+		_, err := resolveWatchRenameArgs(
+			"/tmp/wt", "", "1234567890", "my-session",
+			gitRunner, nil,
+			func() (string, error) { return "", nil },
+			func() int64 { return 0 },
+		)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "resolving branch") {
+			t.Errorf("error = %q, want to contain %q", err.Error(), "resolving branch")
+		}
+	})
+
+	t.Run("created-at unspecified uses nowMilli", func(t *testing.T) {
+		args, err := resolveWatchRenameArgs(
+			"/tmp/wt", "main", "", "my-session",
+			git.FakeCommandRunner{Outputs: map[string]string{}}, nil,
+			func() (string, error) { return "", nil },
+			func() int64 { return 9999999999 },
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if args.createdAt != 9999999999 {
+			t.Errorf("createdAt = %d, want %d", args.createdAt, 9999999999)
+		}
+	})
+
+	t.Run("created-at invalid string", func(t *testing.T) {
+		_, err := resolveWatchRenameArgs(
+			"/tmp/wt", "main", "not-a-number", "my-session",
+			git.FakeCommandRunner{Outputs: map[string]string{}}, nil,
+			func() (string, error) { return "", nil },
+			func() int64 { return 0 },
+		)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "invalid --created-at") {
+			t.Errorf("error = %q, want to contain %q", err.Error(), "invalid --created-at")
+		}
+	})
+
+	t.Run("session-name unspecified with tmux", func(t *testing.T) {
+		t.Setenv("TMUX_PANE", "")
+		tmuxRunner := &tmux.FakeRunner{
+			Outputs: map[string]string{
+				fmt.Sprintf("%v", []string{"display-message", "-p", "#{session_name}"}): "auto-session\n",
+			},
+		}
+		args, err := resolveWatchRenameArgs(
+			"/tmp/wt", "main", "1234567890", "",
+			git.FakeCommandRunner{Outputs: map[string]string{}}, tmuxRunner,
+			func() (string, error) { return "", nil },
+			func() int64 { return 0 },
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if args.sessionName != "auto-session" {
+			t.Errorf("sessionName = %q, want %q", args.sessionName, "auto-session")
+		}
+	})
+
+	t.Run("session-name unspecified without tmux", func(t *testing.T) {
+		args, err := resolveWatchRenameArgs(
+			"/tmp/wt", "main", "1234567890", "",
+			git.FakeCommandRunner{Outputs: map[string]string{}}, nil,
+			func() (string, error) { return "", nil },
+			func() int64 { return 0 },
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if args.sessionName != "" {
+			t.Errorf("sessionName = %q, want %q", args.sessionName, "")
+		}
+	})
 }
 
 func TestShellEscape(t *testing.T) {
