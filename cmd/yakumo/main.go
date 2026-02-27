@@ -33,7 +33,7 @@ Commands:
   diff-ui           Launch diff/PR review UI
   swap-center       Swap center pane with background
   swap-right-below  Swap right-below pane with background
-  watch-rename      Watch for Claude prompt and rename branch (internal)
+  watch-rename      Watch for Claude prompt and rename branch
 
 Flags (worktree UI only):
   --config <path>   Path to config file
@@ -280,6 +280,69 @@ func diffUICommand() string {
 	return exe + " diff-ui"
 }
 
+type watchRenameArgs struct {
+	wtPath      string
+	branch      string
+	createdAt   int64
+	sessionName string
+}
+
+func resolveWatchRenameArgs(
+	rawPath, rawBranch, rawCreatedAt, rawSessionName string,
+	gitRunner git.CommandRunner,
+	tmuxRunner tmux.Runner,
+	getwd func() (string, error),
+	nowMilli func() int64,
+) (watchRenameArgs, error) {
+	var args watchRenameArgs
+
+	// Resolve path
+	if rawPath != "" {
+		args.wtPath = rawPath
+	} else {
+		wd, err := getwd()
+		if err != nil {
+			return args, fmt.Errorf("resolving working directory: %w", err)
+		}
+		args.wtPath = wd
+	}
+
+	// Resolve created-at
+	if rawCreatedAt != "" {
+		v, err := strconv.ParseInt(rawCreatedAt, 10, 64)
+		if err != nil {
+			return args, fmt.Errorf("invalid --created-at: %w", err)
+		}
+		args.createdAt = v
+	} else {
+		args.createdAt = nowMilli()
+	}
+
+	// Resolve branch (depends on resolved path)
+	if rawBranch != "" {
+		args.branch = rawBranch
+	} else {
+		out, err := gitRunner.Run(args.wtPath, "symbolic-ref", "--short", "HEAD")
+		if err != nil {
+			return args, fmt.Errorf("resolving branch: %w", err)
+		}
+		args.branch = strings.TrimSpace(out)
+	}
+
+	// Resolve session-name
+	if rawSessionName != "" {
+		args.sessionName = rawSessionName
+	} else if tmuxRunner != nil {
+		name, err := tmux.CurrentSessionName(tmuxRunner)
+		if err != nil {
+			return args, fmt.Errorf("resolving tmux session: %w", err)
+		}
+		args.sessionName = name
+	}
+
+	return args, nil
+}
+
 func resolveBaseRef() string {
 	baseRef := config.DefaultBaseRef
 	path, err := config.ResolveConfigPath("")
@@ -300,20 +363,26 @@ func runWatchRename() {
 	setupDebugLog()
 
 	fs := flag.NewFlagSet("watch-rename", flag.ExitOnError)
-	wtPath := fs.String("path", "", "absolute path to the worktree")
-	branch := fs.String("branch", "", "original branch name")
-	createdAtStr := fs.String("created-at", "", "unix millisecond timestamp")
-	sessionName := fs.String("session-name", "", "tmux session name to rename")
+	wtPath := fs.String("path", "", "absolute path to the worktree (default: current directory)")
+	branch := fs.String("branch", "", "original branch name (default: current git branch)")
+	createdAtStr := fs.String("created-at", "", "unix millisecond timestamp (default: now)")
+	sessionName := fs.String("session-name", "", "tmux session name (default: current tmux session)")
 	fs.Parse(os.Args[2:])
 
-	if *wtPath == "" || *branch == "" || *createdAtStr == "" {
-		fmt.Fprintln(os.Stderr, "watch-rename requires --path, --branch, and --created-at flags")
-		os.Exit(1)
+	runner := git.OSCommandRunner{}
+
+	var tmuxRunner tmux.Runner
+	if tmux.IsInsideTmux() {
+		tmuxRunner = tmux.OSRunner{}
 	}
 
-	createdAt, err := strconv.ParseInt(*createdAtStr, 10, 64)
+	resolved, err := resolveWatchRenameArgs(
+		*wtPath, *branch, *createdAtStr, *sessionName,
+		runner, tmuxRunner,
+		os.Getwd, func() int64 { return time.Now().UnixMilli() },
+	)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid --created-at: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -331,18 +400,12 @@ func runWatchRename() {
 		HistoryPath: filepath.Join(home, ".claude", "history.jsonl"),
 	}
 	gen := branchname.CLIGenerator{ClaudePath: claudePath}
-	runner := git.OSCommandRunner{}
-
-	var tmuxRunner tmux.Runner
-	if tmux.IsInsideTmux() {
-		tmuxRunner = tmux.OSRunner{}
-	}
 
 	cfg := rename.WatcherConfig{
-		WorktreePath: *wtPath,
-		Branch:       *branch,
-		SessionName:  *sessionName,
-		CreatedAt:    createdAt,
+		WorktreePath: resolved.wtPath,
+		Branch:       resolved.branch,
+		SessionName:  resolved.sessionName,
+		CreatedAt:    resolved.createdAt,
 		PollInterval: 2 * time.Second,
 		Timeout:      10 * time.Minute,
 	}
