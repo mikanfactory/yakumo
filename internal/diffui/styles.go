@@ -84,4 +84,8 @@ var (
 
 	statusMsgStyle = lipgloss.NewStyle().
 			Foreground(colorRed)
+
+	prURLButtonStyle = lipgloss.NewStyle().
+				Foreground(colorSecondary).
+				Underline(true)
 )

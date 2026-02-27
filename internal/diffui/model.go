@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/mikanfactory/yakumo/internal/git"
 	"github.com/mikanfactory/yakumo/internal/github"
@@ -66,6 +68,10 @@ type VimFinishedMsg struct {
 }
 
 type OpenVimResultMsg struct {
+	Err error
+}
+
+type OpenPRResultMsg struct {
 	Err error
 }
 
@@ -189,6 +195,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case OpenPRResultMsg:
+		if msg.Err != nil {
+			m.statusMsg = msg.Err.Error()
+		}
+		return m, nil
+
+	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionRelease && m.activeTab == TabChecks {
+			if zone.Get("open-pr").InBounds(msg) && m.checks.prURL != "" {
+				return m, openPRInBrowserCmd(m.checks.prURL)
+			}
+		}
+		return m, nil
+
 	case TickMsg:
 		return m, tea.Batch(
 			fetchChangesCmd(m.gitRunner, m.repoDir, m.baseRef),
@@ -248,7 +268,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case TabChanges:
 				m.changes = m.changes.update(msg)
 			case TabChecks:
-				m.checks = m.checks.update(msg)
+				var cmd tea.Cmd
+				m.checks, cmd = m.checks.update(msg)
+				if cmd != nil {
+					return m, cmd
+				}
 			}
 		}
 	}
@@ -278,7 +302,7 @@ func (m ChangesModel) update(msg tea.KeyMsg) ChangesModel {
 	return m
 }
 
-func (m ChecksModel) update(msg tea.KeyMsg) ChecksModel {
+func (m ChecksModel) update(msg tea.KeyMsg) (ChecksModel, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		if m.scrollOff > 0 {
@@ -291,8 +315,12 @@ func (m ChecksModel) update(msg tea.KeyMsg) ChecksModel {
 	case "G":
 		// Let the view clamp this
 		m.scrollOff = 999
+	case "o":
+		if m.prURL != "" {
+			return m, openPRInBrowserCmd(m.prURL)
+		}
 	}
-	return m
+	return m, nil
 }
 
 // === Vim in Center Pane ===
@@ -368,6 +396,24 @@ func openVimInIdleCenterPaneCmd(runner tmux.Runner, filePath string, sessionName
 		}
 
 		return OpenVimResultMsg{}
+	}
+}
+
+// === Open PR in Browser ===
+
+func openPRInBrowserCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		var cmd *exec.Cmd
+		switch runtime.GOOS {
+		case "darwin":
+			cmd = exec.Command("open", url)
+		case "windows":
+			cmd = exec.Command("cmd", "/c", "start", url)
+		default:
+			cmd = exec.Command("xdg-open", url)
+		}
+		err := cmd.Start()
+		return OpenPRResultMsg{Err: err}
 	}
 }
 

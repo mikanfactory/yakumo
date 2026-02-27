@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	zone "github.com/lrstanley/bubblezone"
 )
 
 func (m Model) View() string {
@@ -30,7 +31,7 @@ func (m Model) View() string {
 		statusLine = statusMsgStyle.Render("  " + m.statusMsg)
 	}
 
-	help := helpStyle.Render("  tab: switch pane  j/k: navigate  enter: open in vim  q: quit")
+	help := helpStyle.Render("  tab: switch pane  j/k: navigate  enter: open in vim  o: open PR  q: quit")
 
 	return lipgloss.JoinVertical(lipgloss.Left, tabBar, content, statusLine, help)
 }
@@ -157,7 +158,8 @@ func (m ChecksModel) view(width, height int) string {
 	// PR Title
 	allLines = append(allLines, prTitleStyle.Render(m.prTitle))
 	if m.prURL != "" {
-		allLines = append(allLines, filePathDimStyle.Render(m.prURL))
+		button := zone.Mark("open-pr", prURLButtonStyle.Render("[Open in Browser]"))
+		allLines = append(allLines, filePathDimStyle.Render(m.prURL)+" "+button)
 	}
 	allLines = append(allLines, "")
 
@@ -249,5 +251,5 @@ func (m ChecksModel) view(width, height int) string {
 		visible = append(visible, "")
 	}
 
-	return strings.Join(visible, "\n")
+	return zone.Scan(strings.Join(visible, "\n"))
 }

@@ -280,3 +280,53 @@ func TestEnterOnChecksTab(t *testing.T) {
 		t.Error("expected nil command when on Checks tab")
 	}
 }
+
+func TestOKeyOpensPR_OnChecksTab(t *testing.T) {
+	m := Model{
+		activeTab: TabChecks,
+		checks: ChecksModel{
+			prURL: "https://github.com/owner/repo/pull/1",
+		},
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	if cmd == nil {
+		t.Fatal("expected a command for opening PR, got nil")
+	}
+
+	result := cmd()
+	msg, ok := result.(OpenPRResultMsg)
+	if !ok {
+		t.Fatalf("expected OpenPRResultMsg, got %T", result)
+	}
+	// cmd.Start() will fail in test env (no browser), but the type is correct
+	_ = msg
+}
+
+func TestOKeyNoop_WhenPRURLEmpty(t *testing.T) {
+	m := Model{
+		activeTab: TabChecks,
+		checks: ChecksModel{
+			prURL: "",
+		},
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	if cmd != nil {
+		t.Error("expected nil command when prURL is empty")
+	}
+}
+
+func TestOKeyNoop_OnChangesTab(t *testing.T) {
+	m := Model{
+		activeTab: TabChanges,
+		checks: ChecksModel{
+			prURL: "https://github.com/owner/repo/pull/1",
+		},
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	if cmd != nil {
+		t.Error("expected nil command when on Changes tab")
+	}
+}
