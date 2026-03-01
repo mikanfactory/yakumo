@@ -686,6 +686,12 @@ func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath, repoName, base
 		newPath := filepath.Join(basePath, repoName, slug)
 		createdAt := time.Now().UnixMilli()
 
+		if fetchBranch, ok := strings.CutPrefix(baseRef, "origin/"); ok {
+			if err := git.FetchBranch(runner, repoPath, fetchBranch); err != nil {
+				return WorktreeAddErrMsg{Err: fmt.Errorf("fetching %s: %w", baseRef, err)}
+			}
+		}
+
 		if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
 			return WorktreeAddErrMsg{Err: fmt.Errorf("creating parent directory: %w", err)}
 		}

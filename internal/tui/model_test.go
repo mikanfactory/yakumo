@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -442,6 +443,53 @@ func TestAddWorktreeCmd_Success(t *testing.T) {
 		// expected
 	default:
 		t.Errorf("unexpected message type: %T", msg)
+	}
+}
+
+func TestAddWorktreeCmd_FetchError(t *testing.T) {
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			"/repo:[config user.name]": "testuser\n",
+		},
+		Errors: map[string]error{
+			"/repo:[fetch origin main]": fmt.Errorf("network error"),
+		},
+	}
+
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/yakumo", "myrepo", "origin/main")
+	msg := cmd()
+
+	errMsg, ok := msg.(WorktreeAddErrMsg)
+	if !ok {
+		t.Fatalf("expected WorktreeAddErrMsg, got %T", msg)
+	}
+	if errMsg.Err == nil {
+		t.Fatal("expected error to be set")
+	}
+	if got := errMsg.Err.Error(); !strings.Contains(got, "fetching origin/main") {
+		t.Errorf("expected error about fetching, got: %s", got)
+	}
+}
+
+func TestAddWorktreeCmd_NoFetchForNonOriginBaseRef(t *testing.T) {
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			"/repo:[config user.name]": "testuser\n",
+		},
+	}
+
+	// baseRef without "origin/" prefix should skip fetch.
+	// If fetch were attempted, FakeCommandRunner would fail with a "fetching" error.
+	cmd := addWorktreeCmd(runner, "/repo", "/tmp/yakumo", "myrepo", "main")
+	msg := cmd()
+
+	// Should fail at AddWorktree (random country key not registered), not at fetch
+	errMsg, ok := msg.(WorktreeAddErrMsg)
+	if !ok {
+		return // WorktreeAddedMsg is also acceptable
+	}
+	if strings.Contains(errMsg.Err.Error(), "fetching") {
+		t.Errorf("should not attempt fetch for non-origin baseRef, got: %s", errMsg.Err)
 	}
 }
 
