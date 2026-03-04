@@ -22,6 +22,7 @@ import (
 	"github.com/mikanfactory/yakumo/internal/github"
 	"github.com/mikanfactory/yakumo/internal/model"
 	"github.com/mikanfactory/yakumo/internal/rename"
+	"github.com/mikanfactory/yakumo/internal/setupspinner"
 	"github.com/mikanfactory/yakumo/internal/timeparse"
 	"github.com/mikanfactory/yakumo/internal/tmux"
 	"github.com/mikanfactory/yakumo/internal/tui"
@@ -183,66 +184,20 @@ func runWorktreeUI(configPath string) {
 	selected := finalModel.Selected()
 
 	if tmux.IsInsideTmux() {
-		tmuxRunner := tmux.OSRunner{}
-		gitRunner := git.OSCommandRunner{}
-		getBranch := tmux.BranchGetter(func(worktreePath string) (string, error) {
-			out, err := gitRunner.Run(worktreePath, "symbolic-ref", "--short", "HEAD")
-			if err != nil {
-				return "", err
-			}
-			return strings.TrimSpace(out), nil
-		})
-		repo := findRepoByPath(cfg, finalModel.SelectedRepoPath())
-		layout, err := tmux.SelectWorktreeSession(tmuxRunner, selected, repo.StartupCommand, getBranch)
+		spinnerModel := setupspinner.New("Setting up workspace...")
+		spinnerProg := tea.NewProgram(spinnerModel)
+
+		go runSessionSetup(spinnerProg, cfg, finalModel, selected)
+
+		result, err := spinnerProg.Run()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "tmux error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
-
-		// Run additional commands only for newly created sessions
-		if layout.BottomRight1.PaneID != "" {
-			// Launch diff-ui in top-right pane
-			if diffCmd := diffUICommand(); diffCmd != "" {
-				if err := tmux.SendKeys(tmuxRunner, layout.TopRight1.PaneID, diffCmd); err != nil {
-					fmt.Fprintf(os.Stderr, "diff-ui launch error: %v\n", err)
-				}
-			}
-
-			// Ensure claude trust and launch claude CLI in center pane
-			if _, err := exec.LookPath("claude"); err == nil {
-				if home, err := os.UserHomeDir(); err == nil {
-					configPath := filepath.Join(home, ".claude.json")
-					if trustErr := claude.EnsureDirectoryTrusted(configPath, selected); trustErr != nil {
-						fmt.Fprintf(os.Stderr, "claude trust warning: %v\n", trustErr)
-					}
-				}
-				if err := tmux.SendKeys(tmuxRunner, layout.Center1.PaneID, "claude"); err != nil {
-					fmt.Fprintf(os.Stderr, "claude launch error: %v\n", err)
-				}
-			}
-
-			// Focus center pane after all commands are sent
-			if err := tmux.SelectPane(tmuxRunner, layout.Center1.PaneID); err != nil {
-				fmt.Fprintf(os.Stderr, "select pane error: %v\n", err)
-			}
-		}
-
-		// Launch rename watcher in a tmux background pane
-		if renameInfo := finalModel.PendingRename(selected); renameInfo != nil {
-			targetPane := ""
-			if layout.BottomRight2.PaneID != "" {
-				targetPane = layout.BottomRight2.PaneID
-			} else {
-				paneID, err := findIdleBackgroundPane(tmuxRunner, layout.SessionName)
-				if err == nil {
-					targetPane = paneID
-				}
-			}
-			if targetPane != "" {
-				if err := launchRenameWatcher(tmuxRunner, targetPane,
-					selected, renameInfo.OriginalBranch, layout.SessionName, renameInfo.CreatedAt); err != nil {
-					log.Printf("[branch-rename] watcher launch failed: %v", err)
-				}
+		if m, ok := result.(setupspinner.Model); ok {
+			if err := m.Result(); err != nil {
+				fmt.Fprintf(os.Stderr, "tmux error: %v\n", err)
+				os.Exit(1)
 			}
 		}
 
@@ -250,6 +205,78 @@ func runWorktreeUI(configPath string) {
 	}
 
 	fmt.Print(selected)
+}
+
+func runSessionSetup(prog *tea.Program, cfg model.Config, finalModel tui.Model, selected string) {
+	tmuxRunner := tmux.OSRunner{}
+	gitRunner := git.OSCommandRunner{}
+	getBranch := tmux.BranchGetter(func(worktreePath string) (string, error) {
+		out, err := gitRunner.Run(worktreePath, "symbolic-ref", "--short", "HEAD")
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(out), nil
+	})
+
+	prog.Send(setupspinner.StatusMsg("Creating session..."))
+	repo := findRepoByPath(cfg, finalModel.SelectedRepoPath())
+	layout, err := tmux.SelectWorktreeSession(tmuxRunner, selected, repo.StartupCommand, getBranch)
+	if err != nil {
+		prog.Send(setupspinner.DoneMsg{Err: fmt.Errorf("tmux error: %w", err)})
+		return
+	}
+
+	// Run additional commands only for newly created sessions
+	if layout.BottomRight1.PaneID != "" {
+		// Launch diff-ui in top-right pane
+		prog.Send(setupspinner.StatusMsg("Launching diff-ui..."))
+		if diffCmd := diffUICommand(); diffCmd != "" {
+			if err := tmux.SendKeys(tmuxRunner, layout.TopRight1.PaneID, diffCmd); err != nil {
+				log.Printf("[setup] diff-ui launch error: %v", err)
+			}
+		}
+
+		// Ensure claude trust and launch claude CLI in center pane
+		prog.Send(setupspinner.StatusMsg("Launching Claude..."))
+		if _, err := exec.LookPath("claude"); err == nil {
+			if home, err := os.UserHomeDir(); err == nil {
+				configPath := filepath.Join(home, ".claude.json")
+				if trustErr := claude.EnsureDirectoryTrusted(configPath, selected); trustErr != nil {
+					log.Printf("[setup] claude trust warning: %v", trustErr)
+				}
+			}
+			if err := tmux.SendKeys(tmuxRunner, layout.Center1.PaneID, "claude"); err != nil {
+				log.Printf("[setup] claude launch error: %v", err)
+			}
+		}
+
+		// Focus center pane after all commands are sent
+		prog.Send(setupspinner.StatusMsg("Focusing workspace..."))
+		if err := tmux.SelectPane(tmuxRunner, layout.Center1.PaneID); err != nil {
+			log.Printf("[setup] select pane error: %v", err)
+		}
+	}
+
+	// Launch rename watcher in a tmux background pane
+	if renameInfo := finalModel.PendingRename(selected); renameInfo != nil {
+		targetPane := ""
+		if layout.BottomRight2.PaneID != "" {
+			targetPane = layout.BottomRight2.PaneID
+		} else {
+			paneID, err := findIdleBackgroundPane(tmuxRunner, layout.SessionName)
+			if err == nil {
+				targetPane = paneID
+			}
+		}
+		if targetPane != "" {
+			if err := launchRenameWatcher(tmuxRunner, targetPane,
+				selected, renameInfo.OriginalBranch, layout.SessionName, renameInfo.CreatedAt); err != nil {
+				log.Printf("[branch-rename] watcher launch failed: %v", err)
+			}
+		}
+	}
+
+	prog.Send(setupspinner.DoneMsg{})
 }
 
 func runSwapCenter() {
