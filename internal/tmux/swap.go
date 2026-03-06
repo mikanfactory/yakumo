@@ -30,14 +30,14 @@ func SwapCenter(runner Runner) error {
 		return err
 	}
 
-	src1 := session + ":main-window.0"
-	dst1 := session + ":background-window.0"
+	src1 := "=" + session + ":main-window.0"
+	dst1 := "=" + session + ":background-window.0"
 	if _, err := runner.Run("swap-pane", "-d", "-s", src1, "-t", dst1); err != nil {
 		return fmt.Errorf("swap center step 1: %w", err)
 	}
 
-	src2 := session + ":background-window.0"
-	dst2 := session + ":background-window.1"
+	src2 := "=" + session + ":background-window.0"
+	dst2 := "=" + session + ":background-window.1"
 	if _, err := runner.Run("swap-pane", "-d", "-s", src2, "-t", dst2); err != nil {
 		return fmt.Errorf("swap center step 2: %w", err)
 	}
@@ -53,14 +53,14 @@ func SwapRightBelow(runner Runner) error {
 		return err
 	}
 
-	src1 := session + ":main-window.2"
-	dst1 := session + ":background-window.2"
+	src1 := "=" + session + ":main-window.2"
+	dst1 := "=" + session + ":background-window.2"
 	if _, err := runner.Run("swap-pane", "-d", "-s", src1, "-t", dst1); err != nil {
 		return fmt.Errorf("swap right-below step 1: %w", err)
 	}
 
-	src2 := session + ":background-window.2"
-	dst2 := session + ":background-window.3"
+	src2 := "=" + session + ":background-window.2"
+	dst2 := "=" + session + ":background-window.3"
 	if _, err := runner.Run("swap-pane", "-d", "-s", src2, "-t", dst2); err != nil {
 		return fmt.Errorf("swap right-below step 2: %w", err)
 	}

@@ -60,8 +60,8 @@ func TestSwapCenter(t *testing.T) {
 		runner := &FakeRunner{
 			Outputs: map[string]string{
 				"[display-message -p #{session_name}]":                                              "dev",
-				"[swap-pane -d -s dev:main-window.0 -t dev:background-window.0]":                   "",
-				"[swap-pane -d -s dev:background-window.0 -t dev:background-window.1]":             "",
+				"[swap-pane -d -s =dev:main-window.0 -t =dev:background-window.0]":                   "",
+				"[swap-pane -d -s =dev:background-window.0 -t =dev:background-window.1]":             "",
 			},
 		}
 
@@ -95,7 +95,7 @@ func TestSwapCenter(t *testing.T) {
 				"[display-message -p #{session_name}]": "dev",
 			},
 			Errors: map[string]error{
-				"[swap-pane -d -s dev:main-window.0 -t dev:background-window.0]": errors.New("pane not found"),
+				"[swap-pane -d -s =dev:main-window.0 -t =dev:background-window.0]": errors.New("pane not found"),
 			},
 		}
 
@@ -110,10 +110,10 @@ func TestSwapCenter(t *testing.T) {
 		runner := &FakeRunner{
 			Outputs: map[string]string{
 				"[display-message -p #{session_name}]":                            "dev",
-				"[swap-pane -d -s dev:main-window.0 -t dev:background-window.0]": "",
+				"[swap-pane -d -s =dev:main-window.0 -t =dev:background-window.0]": "",
 			},
 			Errors: map[string]error{
-				"[swap-pane -d -s dev:background-window.0 -t dev:background-window.1]": errors.New("pane not found"),
+				"[swap-pane -d -s =dev:background-window.0 -t =dev:background-window.1]": errors.New("pane not found"),
 			},
 		}
 
@@ -132,8 +132,8 @@ func TestSwapRightBelow(t *testing.T) {
 		runner := &FakeRunner{
 			Outputs: map[string]string{
 				"[display-message -p #{session_name}]":                                  "dev",
-				"[swap-pane -d -s dev:main-window.2 -t dev:background-window.2]":        "",
-				"[swap-pane -d -s dev:background-window.2 -t dev:background-window.3]":  "",
+				"[swap-pane -d -s =dev:main-window.2 -t =dev:background-window.2]":        "",
+				"[swap-pane -d -s =dev:background-window.2 -t =dev:background-window.3]":  "",
 			},
 		}
 
@@ -167,7 +167,7 @@ func TestSwapRightBelow(t *testing.T) {
 				"[display-message -p #{session_name}]": "dev",
 			},
 			Errors: map[string]error{
-				"[swap-pane -d -s dev:main-window.2 -t dev:background-window.2]": errors.New("pane not found"),
+				"[swap-pane -d -s =dev:main-window.2 -t =dev:background-window.2]": errors.New("pane not found"),
 			},
 		}
 
@@ -182,10 +182,10 @@ func TestSwapRightBelow(t *testing.T) {
 		runner := &FakeRunner{
 			Outputs: map[string]string{
 				"[display-message -p #{session_name}]":                            "dev",
-				"[swap-pane -d -s dev:main-window.2 -t dev:background-window.2]": "",
+				"[swap-pane -d -s =dev:main-window.2 -t =dev:background-window.2]": "",
 			},
 			Errors: map[string]error{
-				"[swap-pane -d -s dev:background-window.2 -t dev:background-window.3]": errors.New("pane not found"),
+				"[swap-pane -d -s =dev:background-window.2 -t =dev:background-window.3]": errors.New("pane not found"),
 			},
 		}
 

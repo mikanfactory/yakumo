@@ -76,7 +76,7 @@ func buildSessionLayout(sessionName string, mainPaneIDs []string, bgPaneIDs []st
 
 // HasSession checks if a tmux session with the given name exists.
 func HasSession(runner Runner, sessionName string) (bool, error) {
-	_, err := runner.Run("has-session", "-t", sessionName)
+	_, err := runner.Run("has-session", "-t", "="+sessionName)
 	if err != nil {
 		return false, nil
 	}
@@ -85,13 +85,13 @@ func HasSession(runner Runner, sessionName string) (bool, error) {
 
 // KillSession terminates a tmux session with the given name.
 func KillSession(runner Runner, sessionName string) error {
-	_, err := runner.Run("kill-session", "-t", sessionName)
+	_, err := runner.Run("kill-session", "-t", "="+sessionName)
 	return err
 }
 
 // RenameSession renames a tmux session.
 func RenameSession(runner Runner, oldName, newName string) error {
-	_, err := runner.Run("rename-session", "-t", oldName, newName)
+	_, err := runner.Run("rename-session", "-t", "="+oldName, newName)
 	return err
 }
 
@@ -125,10 +125,10 @@ func ResolveSessionName(runner Runner, worktreePath string, getBranch BranchGett
 
 // SwitchToSession switches the client to an existing session and selects the main-window.
 func SwitchToSession(runner Runner, sessionName string) error {
-	if _, err := runner.Run("switch-client", "-t", sessionName); err != nil {
+	if _, err := runner.Run("switch-client", "-t", "="+sessionName); err != nil {
 		return fmt.Errorf("switching to session %s: %w", sessionName, err)
 	}
-	if _, err := runner.Run("select-window", "-t", sessionName+":"+mainWindowName); err != nil {
+	if _, err := runner.Run("select-window", "-t", "="+sessionName+":"+mainWindowName); err != nil {
 		return fmt.Errorf("selecting main-window in session %s: %w", sessionName, err)
 	}
 	return nil
@@ -137,7 +137,7 @@ func SwitchToSession(runner Runner, sessionName string) error {
 // listPaneIDs fetches pane IDs for a specific window in a session.
 func listPaneIDs(runner Runner, sessionName string, windowName string) ([]string, error) {
 	target := sessionName + ":" + windowName
-	out, err := runner.Run("list-panes", "-t", target, "-F", "#{pane_id}")
+	out, err := runner.Run("list-panes", "-t", "="+target, "-F", "#{pane_id}")
 	if err != nil {
 		return nil, fmt.Errorf("listing panes for %s: %w", target, err)
 	}
@@ -155,17 +155,17 @@ func listPaneIDs(runner Runner, sessionName string, windowName string) ([]string
 func createMainWindow(runner Runner, sessionName string, startDir string) error {
 	sessionTarget := sessionName + ":0"
 
-	if _, err := runner.Run("rename-window", "-t", sessionTarget, mainWindowName); err != nil {
+	if _, err := runner.Run("rename-window", "-t", "="+sessionTarget, mainWindowName); err != nil {
 		return fmt.Errorf("renaming window to %s: %w", mainWindowName, err)
 	}
 
 	mainTarget := sessionName + ":" + mainWindowName
 
-	if _, err := runner.Run("split-window", "-h", "-t", mainTarget, "-c", startDir, "-p", "25"); err != nil {
+	if _, err := runner.Run("split-window", "-h", "-t", "="+mainTarget, "-c", startDir, "-p", "25"); err != nil {
 		return fmt.Errorf("creating right column split: %w", err)
 	}
 
-	if _, err := runner.Run("split-window", "-v", "-t", mainTarget+".1", "-c", startDir); err != nil {
+	if _, err := runner.Run("split-window", "-v", "-t", "="+mainTarget+".1", "-c", startDir); err != nil {
 		return fmt.Errorf("creating bottom-right split: %w", err)
 	}
 
@@ -174,14 +174,14 @@ func createMainWindow(runner Runner, sessionName string, startDir string) error 
 
 // createBackgroundWindow creates the background window with 4 panes.
 func createBackgroundWindow(runner Runner, sessionName string, startDir string) error {
-	if _, err := runner.Run("new-window", "-t", sessionName, "-n", backgroundWindowName, "-c", startDir); err != nil {
+	if _, err := runner.Run("new-window", "-t", "="+sessionName, "-n", backgroundWindowName, "-c", startDir); err != nil {
 		return fmt.Errorf("creating background window: %w", err)
 	}
 
 	bgTarget := sessionName + ":" + backgroundWindowName
 
 	for i := 0; i < 3; i++ {
-		if _, err := runner.Run("split-window", "-v", "-t", bgTarget, "-c", startDir); err != nil {
+		if _, err := runner.Run("split-window", "-v", "-t", "="+bgTarget, "-c", startDir); err != nil {
 			return fmt.Errorf("creating background pane %d: %w", i+2, err)
 		}
 	}

@@ -112,7 +112,7 @@ func TestBuildSessionLayout_WrongBgCount(t *testing.T) {
 func TestHasSession_Exists(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[has-session -t my-session]": "",
+			"[has-session -t =my-session]": "",
 		},
 	}
 
@@ -128,7 +128,7 @@ func TestHasSession_Exists(t *testing.T) {
 func TestHasSession_NotExists(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[has-session -t nonexistent]": fmt.Errorf("session not found"),
+			"[has-session -t =nonexistent]": fmt.Errorf("session not found"),
 		},
 	}
 
@@ -146,7 +146,7 @@ func TestHasSession_NotExists(t *testing.T) {
 func TestKillSession_Success(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[kill-session -t my-session]": "",
+			"[kill-session -t =my-session]": "",
 		},
 	}
 
@@ -162,7 +162,7 @@ func TestKillSession_Success(t *testing.T) {
 func TestKillSession_Error(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[kill-session -t nonexistent]": fmt.Errorf("session not found"),
+			"[kill-session -t =nonexistent]": fmt.Errorf("session not found"),
 		},
 	}
 
@@ -177,7 +177,7 @@ func TestKillSession_Error(t *testing.T) {
 func TestRenameSession_Success(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[rename-session -t old-name new-name]": "",
+			"[rename-session -t =old-name new-name]": "",
 		},
 	}
 
@@ -193,7 +193,7 @@ func TestRenameSession_Success(t *testing.T) {
 func TestRenameSession_Error(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[rename-session -t nonexistent new-name]": fmt.Errorf("session not found"),
+			"[rename-session -t =nonexistent new-name]": fmt.Errorf("session not found"),
 		},
 	}
 
@@ -208,7 +208,7 @@ func TestRenameSession_Error(t *testing.T) {
 func TestResolveSessionName_DefaultExists(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[has-session -t south-korea]": "",
+			"[has-session -t =south-korea]": "",
 		},
 	}
 
@@ -221,10 +221,10 @@ func TestResolveSessionName_DefaultExists(t *testing.T) {
 func TestResolveSessionName_SlugExists(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[has-session -t south-korea]": fmt.Errorf("not found"),
+			"[has-session -t =south-korea]": fmt.Errorf("not found"),
 		},
 		Outputs: map[string]string{
-			"[has-session -t fix-login]": "",
+			"[has-session -t =fix-login]": "",
 		},
 	}
 
@@ -241,8 +241,8 @@ func TestResolveSessionName_SlugExists(t *testing.T) {
 func TestResolveSessionName_NeitherExists(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[has-session -t south-korea]": fmt.Errorf("not found"),
-			"[has-session -t fix-login]":   fmt.Errorf("not found"),
+			"[has-session -t =south-korea]": fmt.Errorf("not found"),
+			"[has-session -t =fix-login]":   fmt.Errorf("not found"),
 		},
 	}
 
@@ -259,7 +259,7 @@ func TestResolveSessionName_NeitherExists(t *testing.T) {
 func TestResolveSessionName_NilBranchGetter(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[has-session -t south-korea]": fmt.Errorf("not found"),
+			"[has-session -t =south-korea]": fmt.Errorf("not found"),
 		},
 	}
 
@@ -272,7 +272,7 @@ func TestResolveSessionName_NilBranchGetter(t *testing.T) {
 func TestResolveSessionName_BranchGetterError(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[has-session -t south-korea]": fmt.Errorf("not found"),
+			"[has-session -t =south-korea]": fmt.Errorf("not found"),
 		},
 	}
 
@@ -289,10 +289,10 @@ func TestResolveSessionName_BranchGetterError(t *testing.T) {
 func TestResolveSessionName_NoPrefixBranch(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[has-session -t south-korea]": fmt.Errorf("not found"),
+			"[has-session -t =south-korea]": fmt.Errorf("not found"),
 		},
 		Outputs: map[string]string{
-			"[has-session -t fix-login]": "",
+			"[has-session -t =fix-login]": "",
 		},
 	}
 
@@ -311,8 +311,8 @@ func TestResolveSessionName_NoPrefixBranch(t *testing.T) {
 func TestSwitchToSession_Success(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[switch-client -t my-session]":                    "",
-			"[select-window -t my-session:main-window]": "",
+			"[switch-client -t =my-session]":                    "",
+			"[select-window -t =my-session:main-window]": "",
 		},
 	}
 
@@ -328,7 +328,7 @@ func TestSwitchToSession_Success(t *testing.T) {
 func TestSwitchToSession_SwitchError(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[switch-client -t bad]": fmt.Errorf("switch failed"),
+			"[switch-client -t =bad]": fmt.Errorf("switch failed"),
 		},
 	}
 
@@ -341,10 +341,10 @@ func TestSwitchToSession_SwitchError(t *testing.T) {
 func TestSwitchToSession_SelectWindowError(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[switch-client -t my-session]": "",
+			"[switch-client -t =my-session]": "",
 		},
 		Errors: map[string]error{
-			"[select-window -t my-session:main-window]": fmt.Errorf("window not found"),
+			"[select-window -t =my-session:main-window]": fmt.Errorf("window not found"),
 		},
 	}
 
@@ -359,9 +359,9 @@ func TestSwitchToSession_SelectWindowError(t *testing.T) {
 func TestCreateMainWindow_Success(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[rename-window -t my-session:0 main-window]":                    "",
-			"[split-window -h -t my-session:main-window -c /path -p 25]":    "",
-			"[split-window -v -t my-session:main-window.1 -c /path]": "",
+			"[rename-window -t =my-session:0 main-window]":                    "",
+			"[split-window -h -t =my-session:main-window -c /path -p 25]":    "",
+			"[split-window -v -t =my-session:main-window.1 -c /path]": "",
 		},
 	}
 
@@ -377,7 +377,7 @@ func TestCreateMainWindow_Success(t *testing.T) {
 func TestCreateMainWindow_RenameError(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[rename-window -t s:0 main-window]": fmt.Errorf("rename failed"),
+			"[rename-window -t =s:0 main-window]": fmt.Errorf("rename failed"),
 		},
 	}
 
@@ -393,10 +393,10 @@ func TestCreateMainWindow_RenameError(t *testing.T) {
 func TestCreateMainWindow_FirstSplitError(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[rename-window -t s:0 main-window]": "",
+			"[rename-window -t =s:0 main-window]": "",
 		},
 		Errors: map[string]error{
-			"[split-window -h -t s:main-window -c /path -p 25]": fmt.Errorf("split failed"),
+			"[split-window -h -t =s:main-window -c /path -p 25]": fmt.Errorf("split failed"),
 		},
 	}
 
@@ -409,11 +409,11 @@ func TestCreateMainWindow_FirstSplitError(t *testing.T) {
 func TestCreateMainWindow_SecondSplitError(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[rename-window -t s:0 main-window]":          "",
-			"[split-window -h -t s:main-window -c /path -p 25]": "",
+			"[rename-window -t =s:0 main-window]":          "",
+			"[split-window -h -t =s:main-window -c /path -p 25]": "",
 		},
 		Errors: map[string]error{
-			"[split-window -v -t s:main-window.1 -c /path]": fmt.Errorf("split failed"),
+			"[split-window -v -t =s:main-window.1 -c /path]": fmt.Errorf("split failed"),
 		},
 	}
 
@@ -428,7 +428,7 @@ func TestCreateMainWindow_SecondSplitError(t *testing.T) {
 func TestListPaneIDs_Success(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[list-panes -t s:main-window -F #{pane_id}]": "%0\n%1\n%2\n",
+			"[list-panes -t =s:main-window -F #{pane_id}]": "%0\n%1\n%2\n",
 		},
 	}
 
@@ -444,7 +444,7 @@ func TestListPaneIDs_Success(t *testing.T) {
 func TestListPaneIDs_Error(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[list-panes -t s:w -F #{pane_id}]": fmt.Errorf("list failed"),
+			"[list-panes -t =s:w -F #{pane_id}]": fmt.Errorf("list failed"),
 		},
 	}
 
@@ -459,8 +459,8 @@ func TestListPaneIDs_Error(t *testing.T) {
 func TestCreateBackgroundWindow_Success(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[new-window -t s -n background-window -c /path]":          "",
-			"[split-window -v -t s:background-window -c /path]": "",
+			"[new-window -t =s -n background-window -c /path]":          "",
+			"[split-window -v -t =s:background-window -c /path]": "",
 		},
 	}
 
@@ -477,7 +477,7 @@ func TestCreateBackgroundWindow_Success(t *testing.T) {
 func TestCreateBackgroundWindow_NewWindowError(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[new-window -t s -n background-window -c /path]": fmt.Errorf("new-window failed"),
+			"[new-window -t =s -n background-window -c /path]": fmt.Errorf("new-window failed"),
 		},
 	}
 
@@ -490,10 +490,10 @@ func TestCreateBackgroundWindow_NewWindowError(t *testing.T) {
 func TestCreateBackgroundWindow_SplitError(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[new-window -t s -n background-window -c /path]": "",
+			"[new-window -t =s -n background-window -c /path]": "",
 		},
 		Errors: map[string]error{
-			"[split-window -v -t s:background-window -c /path]": fmt.Errorf("split failed"),
+			"[split-window -v -t =s:background-window -c /path]": fmt.Errorf("split failed"),
 		},
 	}
 
@@ -509,13 +509,13 @@ func newFullSessionRunner(session string, dir string) *FakeRunner {
 	return &FakeRunner{
 		Outputs: map[string]string{
 			fmt.Sprintf("[new-session -d -s %s -c %s]", session, dir):                             "",
-			fmt.Sprintf("[rename-window -t %s:0 main-window]", session):                            "",
-			fmt.Sprintf("[split-window -h -t %s:main-window -c %s -p 25]", session, dir):            "",
-			fmt.Sprintf("[split-window -v -t %s:main-window.1 -c %s]", session, dir):               "",
-			fmt.Sprintf("[list-panes -t %s:main-window -F #{pane_id}]", session):                   "%0\n%1\n%2\n",
-			fmt.Sprintf("[new-window -t %s -n background-window -c %s]", session, dir):             "",
-			fmt.Sprintf("[split-window -v -t %s:background-window -c %s]", session, dir):           "",
-			fmt.Sprintf("[list-panes -t %s:background-window -F #{pane_id}]", session):             "%3\n%4\n%5\n%6\n",
+			fmt.Sprintf("[rename-window -t =%s:0 main-window]", session):                            "",
+			fmt.Sprintf("[split-window -h -t =%s:main-window -c %s -p 25]", session, dir):            "",
+			fmt.Sprintf("[split-window -v -t =%s:main-window.1 -c %s]", session, dir):               "",
+			fmt.Sprintf("[list-panes -t =%s:main-window -F #{pane_id}]", session):                   "%0\n%1\n%2\n",
+			fmt.Sprintf("[new-window -t =%s -n background-window -c %s]", session, dir):             "",
+			fmt.Sprintf("[split-window -v -t =%s:background-window -c %s]", session, dir):           "",
+			fmt.Sprintf("[list-panes -t =%s:background-window -F #{pane_id}]", session):             "%3\n%4\n%5\n%6\n",
 		},
 	}
 }
@@ -558,7 +558,7 @@ func TestCreateSessionLayout_MainWindowError(t *testing.T) {
 			"[new-session -d -s s -c /p]": "",
 		},
 		Errors: map[string]error{
-			"[rename-window -t s:0 main-window]": fmt.Errorf("rename error"),
+			"[rename-window -t =s:0 main-window]": fmt.Errorf("rename error"),
 		},
 	}
 
@@ -572,12 +572,12 @@ func TestCreateSessionLayout_ListMainPanesError(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
 			"[new-session -d -s s -c /p]":                  "",
-			"[rename-window -t s:0 main-window]":           "",
+			"[rename-window -t =s:0 main-window]":           "",
 			"[split-window -h -t s:main-window -c /p -p 25]":     "",
 			"[split-window -v -t s:main-window.1 -c /p]":   "",
 		},
 		Errors: map[string]error{
-			"[list-panes -t s:main-window -F #{pane_id}]": fmt.Errorf("list error"),
+			"[list-panes -t =s:main-window -F #{pane_id}]": fmt.Errorf("list error"),
 		},
 	}
 
@@ -646,9 +646,9 @@ func TestCreateSessionLayout_EmptyStartupCommand(t *testing.T) {
 func TestSelectWorktreeSession_ExistingSession(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
-			"[has-session -t my-worktree]":                    "",
-			"[switch-client -t my-worktree]":                  "",
-			"[select-window -t my-worktree:main-window]":      "",
+			"[has-session -t =my-worktree]":                    "",
+			"[switch-client -t =my-worktree]":                  "",
+			"[select-window -t =my-worktree:main-window]":      "",
 		},
 	}
 
@@ -670,19 +670,19 @@ func TestSelectWorktreeSession_ExistingSession(t *testing.T) {
 func TestSelectWorktreeSession_NewSession(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[has-session -t feat]": fmt.Errorf("not found"),
+			"[has-session -t =feat]": fmt.Errorf("not found"),
 		},
 		Outputs: map[string]string{
 			"[new-session -d -s feat -c /repos/feat]":                              "",
-			"[rename-window -t feat:0 main-window]":                                "",
-			"[split-window -h -t feat:main-window -c /repos/feat -p 25]":                 "",
-			"[split-window -v -t feat:main-window.1 -c /repos/feat]":               "",
-			"[list-panes -t feat:main-window -F #{pane_id}]":                       "%0\n%1\n%2\n",
-			"[new-window -t feat -n background-window -c /repos/feat]":             "",
-			"[split-window -v -t feat:background-window -c /repos/feat]":           "",
-			"[list-panes -t feat:background-window -F #{pane_id}]":                 "%3\n%4\n%5\n%6\n",
-			"[switch-client -t feat]":                                               "",
-			"[select-window -t feat:main-window]":                                  "",
+			"[rename-window -t =feat:0 main-window]":                                "",
+			"[split-window -h -t =feat:main-window -c /repos/feat -p 25]":                 "",
+			"[split-window -v -t =feat:main-window.1 -c /repos/feat]":               "",
+			"[list-panes -t =feat:main-window -F #{pane_id}]":                       "%0\n%1\n%2\n",
+			"[new-window -t =feat -n background-window -c /repos/feat]":             "",
+			"[split-window -v -t =feat:background-window -c /repos/feat]":           "",
+			"[list-panes -t =feat:background-window -F #{pane_id}]":                 "%3\n%4\n%5\n%6\n",
+			"[switch-client -t =feat]":                                               "",
+			"[select-window -t =feat:main-window]":                                  "",
 		},
 	}
 
@@ -701,7 +701,7 @@ func TestSelectWorktreeSession_NewSession(t *testing.T) {
 func TestSelectWorktreeSession_CreateError(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[has-session -t bad]":              fmt.Errorf("not found"),
+			"[has-session -t =bad]":              fmt.Errorf("not found"),
 			"[new-session -d -s bad -c /bad]": fmt.Errorf("create failed"),
 		},
 	}
@@ -715,18 +715,18 @@ func TestSelectWorktreeSession_CreateError(t *testing.T) {
 func TestSelectWorktreeSession_SwitchAfterCreateError(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
-			"[has-session -t feat]":  fmt.Errorf("not found"),
-			"[switch-client -t feat]": fmt.Errorf("switch failed"),
+			"[has-session -t =feat]":  fmt.Errorf("not found"),
+			"[switch-client -t =feat]": fmt.Errorf("switch failed"),
 		},
 		Outputs: map[string]string{
 			"[new-session -d -s feat -c /repos/feat]":                      "",
-			"[rename-window -t feat:0 main-window]":                        "",
-			"[split-window -h -t feat:main-window -c /repos/feat -p 25]":         "",
-			"[split-window -v -t feat:main-window.1 -c /repos/feat]":       "",
-			"[list-panes -t feat:main-window -F #{pane_id}]":               "%0\n%1\n%2\n",
-			"[new-window -t feat -n background-window -c /repos/feat]":     "",
-			"[split-window -v -t feat:background-window -c /repos/feat]":   "",
-			"[list-panes -t feat:background-window -F #{pane_id}]":         "%3\n%4\n%5\n%6\n",
+			"[rename-window -t =feat:0 main-window]":                        "",
+			"[split-window -h -t =feat:main-window -c /repos/feat -p 25]":         "",
+			"[split-window -v -t =feat:main-window.1 -c /repos/feat]":       "",
+			"[list-panes -t =feat:main-window -F #{pane_id}]":               "%0\n%1\n%2\n",
+			"[new-window -t =feat -n background-window -c /repos/feat]":     "",
+			"[split-window -v -t =feat:background-window -c /repos/feat]":   "",
+			"[list-panes -t =feat:background-window -F #{pane_id}]":         "%3\n%4\n%5\n%6\n",
 		},
 	}
 

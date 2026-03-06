@@ -344,8 +344,8 @@ func TestWatcher_Run_RenamesTmuxSession(t *testing.T) {
 	}
 	tmuxRunner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			"[has-session -t south-korea]":                  "",
-			"[rename-session -t south-korea add-jwt-auth]": "",
+			"[has-session -t =south-korea]":                  "",
+			"[rename-session -t =south-korea add-jwt-auth]": "",
 		},
 	}
 
@@ -391,10 +391,10 @@ func TestWatcher_Run_TmuxRenameFailureNonFatal(t *testing.T) {
 	}
 	tmuxRunner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			"[has-session -t south-korea]": "",
+			"[has-session -t =south-korea]": "",
 		},
 		Errors: map[string]error{
-			"[rename-session -t south-korea add-jwt-auth]": fmt.Errorf("tmux error"),
+			"[rename-session -t =south-korea add-jwt-auth]": fmt.Errorf("tmux error"),
 		},
 	}
 
@@ -434,8 +434,8 @@ func TestWatcher_Run_RenamesTmuxSession_ResolvedBySlug(t *testing.T) {
 		Outputs: map[string]string{
 			// filepath.Base("south-korea") session does NOT exist
 			// Branch slug "south-korea" session DOES exist (already renamed)
-			"[has-session -t south-korea]":                  "",
-			"[rename-session -t south-korea add-jwt-auth]": "",
+			"[has-session -t =south-korea]":                  "",
+			"[rename-session -t =south-korea add-jwt-auth]": "",
 		},
 	}
 
@@ -457,7 +457,7 @@ func TestWatcher_Run_RenamesTmuxSession_ResolvedBySlug(t *testing.T) {
 	// Verify tmux rename-session was called with resolved name
 	found := false
 	for _, call := range tmuxRunner.Calls {
-		if len(call) >= 3 && call[0] == "rename-session" && call[2] == "south-korea" {
+		if len(call) >= 3 && call[0] == "rename-session" && call[2] == "=south-korea" {
 			found = true
 		}
 	}
@@ -486,8 +486,8 @@ func TestWatcher_Run_RenamesTmuxSession_FallbackToSlug(t *testing.T) {
 	tmuxRunner := &tmux.FakeRunner{
 		Outputs: map[string]string{
 			// directory-based name exists
-			"[has-session -t saint-pierre-and-miquelon]":                           "",
-			"[rename-session -t saint-pierre-and-miquelon fix-diffui-session-error]": "",
+			"[has-session -t =saint-pierre-and-miquelon]":                           "",
+			"[rename-session -t =saint-pierre-and-miquelon fix-diffui-session-error]": "",
 		},
 		Errors: map[string]error{},
 	}
@@ -510,7 +510,7 @@ func TestWatcher_Run_RenamesTmuxSession_FallbackToSlug(t *testing.T) {
 	// Verify rename-session was called with the resolved name
 	found := false
 	for _, call := range tmuxRunner.Calls {
-		if len(call) >= 4 && call[0] == "rename-session" && call[2] == "saint-pierre-and-miquelon" && call[3] == "fix-diffui-session-error" {
+		if len(call) >= 4 && call[0] == "rename-session" && call[2] == "=saint-pierre-and-miquelon" && call[3] == "fix-diffui-session-error" {
 			found = true
 		}
 	}

@@ -1319,8 +1319,8 @@ func TestRenameBranchCmd_WithTmuxRunner_RenamesSession(t *testing.T) {
 	}
 	tmuxRunner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			"[has-session -t worktree]":                       "",
-			"[rename-session -t worktree fix-login-redirect]": "",
+			"[has-session -t =worktree]":                       "",
+			"[rename-session -t =worktree fix-login-redirect]": "",
 		},
 	}
 
@@ -1363,8 +1363,8 @@ func TestRenameBranchCmd_WithTmuxRunner_ResolvesSlugSession(t *testing.T) {
 	tmuxRunner := &tmux.FakeRunner{
 		Outputs: map[string]string{
 			// directory-based session exists
-			"[has-session -t saint-pierre-and-miquelon]":                     "",
-			"[rename-session -t saint-pierre-and-miquelon fix-diffui-error]": "",
+			"[has-session -t =saint-pierre-and-miquelon]":                     "",
+			"[rename-session -t =saint-pierre-and-miquelon fix-diffui-error]": "",
 		},
 	}
 
@@ -1382,7 +1382,7 @@ func TestRenameBranchCmd_WithTmuxRunner_ResolvesSlugSession(t *testing.T) {
 	// Verify rename-session was called with the resolved slug name
 	found := false
 	for _, call := range tmuxRunner.Calls {
-		if len(call) >= 4 && call[0] == "rename-session" && call[2] == "saint-pierre-and-miquelon" && call[3] == "fix-diffui-error" {
+		if len(call) >= 4 && call[0] == "rename-session" && call[2] == "=saint-pierre-and-miquelon" && call[3] == "fix-diffui-error" {
 			found = true
 		}
 	}
@@ -1606,7 +1606,7 @@ func TestArchiveWorktreeCmd_Success(t *testing.T) {
 	}
 	tmuxRunner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			"[kill-session -t old-worktree]": "",
+			"[kill-session -t =old-worktree]": "",
 		},
 	}
 
@@ -1636,7 +1636,7 @@ func TestArchiveWorktreeCmd_Error(t *testing.T) {
 	}
 	tmuxRunner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			"[kill-session -t old-worktree]": "",
+			"[kill-session -t =old-worktree]": "",
 		},
 	}
 
