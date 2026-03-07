@@ -298,7 +298,7 @@ func TestDetectSessionAgents_OneClaude(t *testing.T) {
 
 	runner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			fmt.Sprintf("%v", []string{"has-session", "-t", "my-session"}):                                                                 "",
+			fmt.Sprintf("%v", []string{"has-session", "-t", "=my-session"}):                                                                "",
 			fmt.Sprintf("%v", []string{"list-panes", "-s", "-t", "my-session", "-F", "#{pane_id}\t#{pane_title}\t#{pane_current_command}"}): "%0\t✳ claude\tnode\n%1\tbash\tbash\n",
 			fmt.Sprintf("%v", []string{"capture-pane", "-p", "-t", "%0"}):                                                                  captureIdle,
 		},
@@ -325,7 +325,7 @@ func TestDetectSessionAgents_MultipleClaude(t *testing.T) {
 
 	runner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			fmt.Sprintf("%v", []string{"has-session", "-t", "my-session"}):                                                                 "",
+			fmt.Sprintf("%v", []string{"has-session", "-t", "=my-session"}):                                                                "",
 			fmt.Sprintf("%v", []string{"list-panes", "-s", "-t", "my-session", "-F", "#{pane_id}\t#{pane_title}\t#{pane_current_command}"}): "%0\t✳ claude\tnode\n%1\t\u2840 task\tclaude\n%2\tbash\tbash\n",
 			fmt.Sprintf("%v", []string{"capture-pane", "-p", "-t", "%0"}):                                                                  captureIdle,
 			fmt.Sprintf("%v", []string{"capture-pane", "-p", "-t", "%1"}):                                                                  captureRunning,

@@ -1001,12 +1001,12 @@ func TestUpdate_AgentStatusMsg_Empty(t *testing.T) {
 func TestFetchAgentStatusCmd(t *testing.T) {
 	runner := &tmux.FakeRunner{
 		Outputs: map[string]string{
-			fmt.Sprintf("%v", []string{"has-session", "-t", "repo1"}):                                                                  "",
+			fmt.Sprintf("%v", []string{"has-session", "-t", "=repo1"}):                                                                 "",
 			fmt.Sprintf("%v", []string{"list-panes", "-s", "-t", "repo1", "-F", "#{pane_id}\t#{pane_title}\t#{pane_current_command}"}): "%0\t✳ claude\tnode\n",
 			fmt.Sprintf("%v", []string{"capture-pane", "-p", "-t", "%0"}):                                                              "  ❯ ",
 		},
 		Errors: map[string]error{
-			fmt.Sprintf("%v", []string{"has-session", "-t", "repo1-feat"}): fmt.Errorf("no session"),
+			fmt.Sprintf("%v", []string{"has-session", "-t", "=repo1-feat"}): fmt.Errorf("no session"),
 		},
 	}
 
@@ -1704,11 +1704,11 @@ func TestArchiveWorktreeCmd_SwitchesToMainWhenInCurrentSession(t *testing.T) {
 	tmuxRunner := &tmux.FakeRunner{
 		Outputs: map[string]string{
 			// ResolveSessionName: has-session finds the session
-			"[has-session -t south-korea]": "",
+			"[has-session -t =south-korea]": "",
 			// IsCurrentSession: current session matches
 			"[display-message -p #{session_name}]": "south-korea\n",
 			// SwitchToMainSession: main session exists
-			"[has-session -t yakumo-main]": "",
+			"[has-session -t =yakumo-main]": "",
 			// SwitchToMainSession: switch-client
 			"[switch-client -t yakumo-main]": "",
 			// KillSession
