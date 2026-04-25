@@ -1859,7 +1859,7 @@ func TestAddWorktreeFromURLCmd_BranchURL(t *testing.T) {
 func TestAddWorktreeFromURLCmd_InvalidURL(t *testing.T) {
 	runner := git.FakeCommandRunner{}
 
-	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/yakumo", "myrepo", "not-a-url")
+	cmd := addWorktreeFromURLCmd(runner, nil, "/repo", "/tmp/yakumo", "myrepo", "https://example.com/not-github")
 	msg := cmd()
 
 	_, ok := msg.(WorktreeAddErrMsg)
@@ -1916,6 +1916,82 @@ func TestAddWorktreeFromURLCmd_PR_WithGhRunner(t *testing.T) {
 	}
 	if addedMsg.WorktreePath != wantPath {
 		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, wantPath)
+	}
+}
+
+func TestUpdate_AddWorktreeMode_Enter_BranchName_FetchesAndAdds(t *testing.T) {
+	m := testModel()
+	m.addingWorktree = true
+	m.addingWorktreeRepoPath = "/code/repo1"
+	m.config = model.Config{
+		WorktreeBasePath: "/tmp/yakumo",
+		Repositories:     []model.RepositoryDef{{Name: "repo1", Path: "/code/repo1"}},
+	}
+	m.textInput.SetValue("feature/my-branch")
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := result.(Model)
+
+	if updated.addingWorktree {
+		t.Error("addingWorktree should be false after Enter")
+	}
+	if !updated.loading {
+		t.Error("loading should be true (fetching and creating worktree)")
+	}
+	if cmd == nil {
+		t.Error("expected addWorktreeFromBranchNameCmd to be returned")
+	}
+}
+
+func TestAddWorktreeFromBranchNameCmd_Success(t *testing.T) {
+	basePath := t.TempDir()
+	branch := "feature/x"
+	wantPath := filepath.Join(basePath, "myrepo", "x")
+	fetchKey := fmt.Sprintf("/repo:%v", []string{"fetch", "origin", branch})
+	addKey := fmt.Sprintf("/repo:%v", []string{"worktree", "add", wantPath, branch})
+
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			fetchKey: "",
+			addKey:   "",
+		},
+	}
+
+	cmd := addWorktreeFromBranchNameCmd(runner, "/repo", basePath, "myrepo", branch)
+	msg := cmd()
+
+	addedMsg, ok := msg.(WorktreeAddedMsg)
+	if !ok {
+		t.Fatalf("expected WorktreeAddedMsg, got %T: %v", msg, msg)
+	}
+	if addedMsg.Branch != branch {
+		t.Errorf("Branch = %q, want %q", addedMsg.Branch, branch)
+	}
+	if addedMsg.WorktreePath != wantPath {
+		t.Errorf("WorktreePath = %q, want %q", addedMsg.WorktreePath, wantPath)
+	}
+}
+
+func TestAddWorktreeFromBranchNameCmd_FetchFails(t *testing.T) {
+	basePath := t.TempDir()
+	branch := "does-not-exist"
+	fetchKey := fmt.Sprintf("/repo:%v", []string{"fetch", "origin", branch})
+
+	runner := git.FakeCommandRunner{
+		Errors: map[string]error{
+			fetchKey: fmt.Errorf("couldn't find remote ref %s", branch),
+		},
+	}
+
+	cmd := addWorktreeFromBranchNameCmd(runner, "/repo", basePath, "myrepo", branch)
+	msg := cmd()
+
+	errMsg, ok := msg.(WorktreeAddErrMsg)
+	if !ok {
+		t.Fatalf("expected WorktreeAddErrMsg, got %T: %v", msg, msg)
+	}
+	if errMsg.Err == nil {
+		t.Error("expected error from fetch failure")
 	}
 }
 
