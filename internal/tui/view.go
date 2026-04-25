@@ -186,7 +186,7 @@ func renderAddWorktreeView(m Model) string {
 		return b.String()
 	}
 
-	b.WriteString("  Paste a GitHub URL or press Enter for a new branch:\n\n")
+	b.WriteString("  Paste a GitHub URL, enter a branch name, or press Enter for a new branch:\n\n")
 	b.WriteString("  ")
 	b.WriteString(m.textInput.View())
 	b.WriteString("\n")
