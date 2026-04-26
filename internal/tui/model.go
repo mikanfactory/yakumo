@@ -694,14 +694,11 @@ func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath, repoName, base
 		}
 
 		country := git.RandomCountry()
-		slug := git.Slugify(country)
+		baseSlug := git.Slugify(country)
 		userSlug := branchname.SanitizeBranchName(userName)
 		if userSlug == "" {
 			userSlug = "user"
 		}
-		branch := userSlug + "/" + slug
-		newPath := filepath.Join(basePath, repoName, slug)
-		createdAt := time.Now().UnixMilli()
 
 		if fetchBranch, ok := strings.CutPrefix(baseRef, "origin/"); ok {
 			if err := git.FetchBranch(runner, repoPath, fetchBranch); err != nil {
@@ -709,18 +706,36 @@ func addWorktreeCmd(runner git.CommandRunner, repoPath, basePath, repoName, base
 			}
 		}
 
-		if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(basePath, repoName), 0o755); err != nil {
 			return WorktreeAddErrMsg{Err: fmt.Errorf("creating parent directory: %w", err)}
 		}
 
-		if err := git.AddWorktree(runner, repoPath, newPath, branch, baseRef); err != nil {
-			return WorktreeAddErrMsg{Err: err}
+		const maxRetries = 10
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			slug := baseSlug
+			if attempt > 1 {
+				slug = fmt.Sprintf("%s-%d", baseSlug, attempt)
+			}
+			branch := userSlug + "/" + slug
+			newPath := filepath.Join(basePath, repoName, slug)
+			createdAt := time.Now().UnixMilli()
+
+			if err := git.AddWorktree(runner, repoPath, newPath, branch, baseRef); err != nil {
+				if git.IsBranchExistsError(err) {
+					continue
+				}
+				return WorktreeAddErrMsg{Err: err}
+			}
+
+			return WorktreeAddedMsg{
+				WorktreePath: newPath,
+				Branch:       branch,
+				CreatedAt:    createdAt,
+			}
 		}
 
-		return WorktreeAddedMsg{
-			WorktreePath: newPath,
-			Branch:       branch,
-			CreatedAt:    createdAt,
+		return WorktreeAddErrMsg{
+			Err: fmt.Errorf("could not create worktree for %q: branch already exists after %d attempts", baseSlug, maxRetries),
 		}
 	}
 }

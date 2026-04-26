@@ -1,6 +1,7 @@
 package git
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -272,6 +273,25 @@ func TestAddWorktreeFromBranch_Error(t *testing.T) {
 	err := AddWorktreeFromBranch(runner, "/repo", "/tmp/new-worktree", "feature/my-branch")
 	if err == nil {
 		t.Error("expected error, got nil")
+	}
+}
+
+func TestIsBranchExistsError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"branch exists", fmt.Errorf("git [...] failed: fatal: A branch named 'user/japan' already exists."), true},
+		{"other error", fmt.Errorf("network error"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsBranchExistsError(tt.err); got != tt.want {
+				t.Errorf("IsBranchExistsError() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

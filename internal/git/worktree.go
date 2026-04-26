@@ -87,6 +87,11 @@ func parseBlock(block string) worktreeEntry {
 	return entry
 }
 
+// IsBranchExistsError reports whether err indicates a branch name collision.
+func IsBranchExistsError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "already exists")
+}
+
 // AddWorktree creates a new worktree with a new branch.
 func AddWorktree(runner CommandRunner, repoPath, newPath, branch, baseRef string) error {
 	if baseRef == "" {
