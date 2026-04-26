@@ -2161,3 +2161,93 @@ func TestUpdateAddRepoMode_SameDirTyping_NoFetch(t *testing.T) {
 		t.Errorf("lastSuggestionDir should remain /usr/, got %q", updated.lastSuggestionDir)
 	}
 }
+
+func scrollTestModel(numGroups int) Model {
+	groups := make([]model.RepoGroup, numGroups)
+	for i := 0; i < numGroups; i++ {
+		groups[i] = model.RepoGroup{
+			Name:     fmt.Sprintf("repo%d", i),
+			RootPath: fmt.Sprintf("/code/repo%d", i),
+			Worktrees: []model.WorktreeInfo{
+				{Path: fmt.Sprintf("/code/repo%d/main", i), Branch: "main"},
+				{Path: fmt.Sprintf("/code/repo%d/feat", i), Branch: "feature"},
+			},
+		}
+	}
+	items := sidebar.BuildItems(groups)
+	return Model{
+		items:        items,
+		groups:       groups,
+		cursor:       FirstSelectable(items),
+		sidebarWidth: 30,
+		height:       14,
+		textInput:    textinput.New(),
+	}
+}
+
+func TestUpdate_DownToBottom_AdvancesScrollOff(t *testing.T) {
+	m := scrollTestModel(5)
+	if m.scrollOff != 0 {
+		t.Fatalf("starting scrollOff should be 0, got %d", m.scrollOff)
+	}
+
+	// Press `j` enough times to reach the last selectable item.
+	for i := 0; i < 100; i++ {
+		result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		next := result.(Model)
+		if next.cursor == m.cursor {
+			break
+		}
+		m = next
+	}
+
+	if m.scrollOff == 0 {
+		t.Errorf("scrollOff should advance after navigating to bottom (height=%d, items=%d), got 0", m.height, len(m.items))
+	}
+}
+
+func TestUpdate_UpFromBottom_ResetsScrollOff(t *testing.T) {
+	m := scrollTestModel(5)
+
+	// Navigate down to the bottom.
+	for i := 0; i < 100; i++ {
+		result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		next := result.(Model)
+		if next.cursor == m.cursor {
+			break
+		}
+		m = next
+	}
+	if m.scrollOff == 0 {
+		t.Fatal("setup: expected scrollOff > 0 after reaching bottom")
+	}
+
+	// Navigate back to the top.
+	for i := 0; i < 100; i++ {
+		result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+		next := result.(Model)
+		if next.cursor == m.cursor {
+			break
+		}
+		m = next
+	}
+
+	if m.scrollOff != 0 {
+		t.Errorf("scrollOff should be 0 after returning to top, got %d", m.scrollOff)
+	}
+}
+
+func TestUpdate_WindowSizeMsg_LargeHeight_ResetsScrollOff(t *testing.T) {
+	m := scrollTestModel(5)
+	m.scrollOff = 3 // simulate prior scroll state
+
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 200})
+	updated := result.(Model)
+
+	if updated.height != 200 {
+		t.Errorf("height = %d, want 200", updated.height)
+	}
+	if updated.scrollOff != 0 {
+		t.Errorf("scrollOff should reset to 0 when viewport fits all items, got %d", updated.scrollOff)
+	}
+}

@@ -181,6 +181,106 @@ func TestView_TruncatesLongBranch(t *testing.T) {
 	}
 }
 
+// manyGroupsModel builds a Model with `n` groups, each having a few worktrees,
+// to provide more rendered rows than typical test viewports can fit.
+func manyGroupsModel(n int) Model {
+	groups := make([]model.RepoGroup, n)
+	for i := 0; i < n; i++ {
+		groups[i] = model.RepoGroup{
+			Name:     fmt.Sprintf("repo%d", i),
+			RootPath: fmt.Sprintf("/code/repo%d", i),
+			Worktrees: []model.WorktreeInfo{
+				{Path: fmt.Sprintf("/code/repo%d/main", i), Branch: "main"},
+				{Path: fmt.Sprintf("/code/repo%d/feat", i), Branch: "feature"},
+			},
+		}
+	}
+	items := sidebar.BuildItems(groups)
+	return Model{
+		items:        items,
+		groups:       groups,
+		cursor:       FirstSelectable(items),
+		sidebarWidth: 30,
+		textInput:    textinput.New(),
+	}
+}
+
+func TestView_FitsInViewport(t *testing.T) {
+	m := manyGroupsModel(5)
+	m.height = 14
+
+	// Move cursor to last item and recompute scroll, simulating the user
+	// having pressed `j` until reaching the bottom.
+	for i := len(m.items) - 1; i >= 0; i-- {
+		if m.items[i].Selectable {
+			m.cursor = i
+			break
+		}
+	}
+	m = recomputeScroll(m)
+
+	view := m.View()
+	lines := strings.Count(view, "\n") + 1
+	if lines > m.height {
+		t.Errorf("view has %d lines, exceeds terminal height %d:\n%s", lines, m.height, view)
+	}
+}
+
+func TestView_LastItemVisibleWhenCursorAtEnd(t *testing.T) {
+	m := manyGroupsModel(5)
+	m.height = 14
+
+	for i := len(m.items) - 1; i >= 0; i-- {
+		if m.items[i].Selectable {
+			m.cursor = i
+			break
+		}
+	}
+	m = recomputeScroll(m)
+
+	view := m.View()
+	if !strings.Contains(view, "Settings") {
+		t.Errorf("last item 'Settings' should be visible when cursor is at end:\n%s", view)
+	}
+}
+
+func TestView_HidesItemsBeforeScrollOff(t *testing.T) {
+	m := manyGroupsModel(5)
+	m.height = 14
+
+	// Navigate cursor to the last item; recomputeScroll will set scrollOff
+	// so that earlier items are pushed off-viewport.
+	for i := len(m.items) - 1; i >= 0; i-- {
+		if m.items[i].Selectable {
+			m.cursor = i
+			break
+		}
+	}
+	m = recomputeScroll(m)
+
+	if m.scrollOff == 0 {
+		t.Fatalf("expected scrollOff > 0 after navigating to last item with small height, got 0")
+	}
+
+	view := m.View()
+	// The first group's header should be scrolled off.
+	if strings.Contains(view, "repo0") {
+		t.Errorf("'repo0' header should be hidden when scrollOff > 0:\n%s", view)
+	}
+}
+
+func TestView_RendersAllWhenHeightUnset(t *testing.T) {
+	m := manyGroupsModel(5)
+	// m.height = 0 means "size unknown — render every item".
+	view := m.View()
+	if !strings.Contains(view, "repo0") {
+		t.Error("view should render first group when height is unset")
+	}
+	if !strings.Contains(view, "Settings") {
+		t.Error("view should render last item when height is unset")
+	}
+}
+
 func TestFormatStatus_Empty(t *testing.T) {
 	result := FormatStatus(model.StatusInfo{})
 	if result != "" {
