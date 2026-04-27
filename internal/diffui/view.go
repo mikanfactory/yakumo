@@ -31,7 +31,7 @@ func (m Model) View() string {
 		statusLine = statusMsgStyle.Render("  " + m.statusMsg)
 	}
 
-	help := helpStyle.Render("  tab: switch pane  j/k: navigate  enter: open in vim  o: open PR  q: quit")
+	help := helpStyle.Render("  tab: switch pane  j/k: navigate  enter: open in zed  o: open PR  q: quit")
 
 	return lipgloss.JoinVertical(lipgloss.Left, tabBar, content, statusLine, help)
 }
