@@ -86,19 +86,9 @@ func runDiffUI() {
 	}
 	ghRunner := github.OSRunner{}
 
-	var tmuxRunner tmux.Runner
-	if tmux.IsInsideTmux() {
-		tmuxRunner = tmux.OSRunner{}
-	}
-
-	var sessionName string
-	if tmuxRunner != nil {
-		sessionName, _ = tmux.CurrentSessionName(tmuxRunner)
-	}
-
 	baseRef := resolveBaseRef()
 	p := tea.NewProgram(
-		diffui.NewModel(dir, gitRunner, ghRunner, tmuxRunner, sessionName, baseRef),
+		diffui.NewModel(dir, gitRunner, ghRunner, baseRef),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)

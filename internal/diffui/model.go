@@ -13,7 +13,6 @@ import (
 
 	"github.com/mikanfactory/yakumo/internal/git"
 	"github.com/mikanfactory/yakumo/internal/github"
-	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
 // === Tab ===
@@ -63,11 +62,7 @@ type ChecksDataErrMsg struct {
 	Err error
 }
 
-type VimFinishedMsg struct {
-	Err error
-}
-
-type OpenVimResultMsg struct {
+type OpenEditorResultMsg struct {
 	Err error
 }
 
@@ -103,18 +98,31 @@ type ChecksModel struct {
 
 // === Main Model ===
 
+// CommandStarter starts an external command without blocking.
+// Implementations should reap the child process to avoid zombies.
+type CommandStarter func(name string, args ...string) error
+
+func defaultCommandStarter(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
 type Model struct {
 	activeTab Tab
 	width     int
 	height    int
 	quitting  bool
 
-	repoDir     string
-	gitRunner   git.CommandRunner
-	ghRunner    github.Runner
-	tmuxRunner  tmux.Runner // nil when not inside tmux
-	sessionName string      // cached tmux session name (empty when not in tmux)
-	baseRef     string
+	repoDir   string
+	gitRunner git.CommandRunner
+	ghRunner  github.Runner
+	baseRef   string
+
+	editorStarter CommandStarter
 
 	statusMsg string
 
@@ -123,19 +131,16 @@ type Model struct {
 }
 
 // NewModel creates a new diff UI model.
-// tmuxRunner may be nil when running outside tmux (vim opens in the current pane).
-// sessionName is the cached tmux session name; pass "" if unknown.
-func NewModel(repoDir string, gitRunner git.CommandRunner, ghRunner github.Runner, tmuxRunner tmux.Runner, sessionName string, baseRef string) Model {
+func NewModel(repoDir string, gitRunner git.CommandRunner, ghRunner github.Runner, baseRef string) Model {
 	return Model{
-		activeTab:   TabChanges,
-		width:       80,
-		height:      24,
-		repoDir:     repoDir,
-		gitRunner:   gitRunner,
-		ghRunner:    ghRunner,
-		tmuxRunner:  tmuxRunner,
-		sessionName: sessionName,
-		baseRef:     baseRef,
+		activeTab:     TabChanges,
+		width:         80,
+		height:        24,
+		repoDir:       repoDir,
+		gitRunner:     gitRunner,
+		ghRunner:      ghRunner,
+		baseRef:       baseRef,
+		editorStarter: defaultCommandStarter,
 		changes: ChangesModel{
 			loading: true,
 		},
@@ -183,13 +188,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.checks.err = msg.Err
 		return m, nil
 
-	case VimFinishedMsg:
-		return m, tea.Batch(
-			fetchChangesCmd(m.gitRunner, m.repoDir, m.baseRef),
-			fetchChecksCmd(m.ghRunner, m.gitRunner, m.repoDir, m.baseRef),
-		)
-
-	case OpenVimResultMsg:
+	case OpenEditorResultMsg:
 		if msg.Err != nil {
 			m.statusMsg = msg.Err.Error()
 		}
@@ -250,16 +249,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == TabChanges && len(m.changes.files) > 0 {
 				file := m.changes.files[m.changes.cursor]
 				fullPath := filepath.Join(m.repoDir, file.Path)
-
-				if m.tmuxRunner != nil {
-					return m, openVimInIdleCenterPaneCmd(m.tmuxRunner, fullPath, m.sessionName)
-				}
-
-				// Fallback: open vim in the current pane (non-tmux environment)
-				c := exec.Command("vim", fullPath)
-				return m, tea.ExecProcess(c, func(err error) tea.Msg {
-					return VimFinishedMsg{Err: err}
-				})
+				return m, openZedCmd(m.editorStarter, fullPath)
 			}
 			return m, nil
 
@@ -323,79 +313,14 @@ func (m ChecksModel) update(msg tea.KeyMsg) (ChecksModel, tea.Cmd) {
 	return m, nil
 }
 
-// === Vim in Center Pane ===
+// === Open File in Zed ===
 
-// centerPaneTargets returns the tmux targets for all center panes relative to a session.
-func centerPaneTargets(session string) []string {
-	return []string{
-		session + ":main-window.0",
-		session + ":background-window.0",
-		session + ":background-window.1",
-	}
-}
-
-// isShellCommand returns true if the command name indicates an idle shell prompt.
-func isShellCommand(cmd string) bool {
-	cmd = strings.TrimSpace(cmd)
-	cmd = strings.TrimPrefix(cmd, "-") // login shell prefix (e.g., "-zsh")
-	cmd = strings.ToLower(cmd)
-	switch cmd {
-	case "zsh", "bash", "fish", "sh", "dash", "ksh":
-		return true
-	}
-	return false
-}
-
-// openVimInIdleCenterPaneCmd finds an idle center pane, sends vim there,
-// swaps it to main-window if needed, and focuses it.
-// When sessionName is non-empty it is used directly; otherwise CurrentSessionName is called as a fallback.
-func openVimInIdleCenterPaneCmd(runner tmux.Runner, filePath string, sessionName string) tea.Cmd {
+func openZedCmd(starter CommandStarter, filePath string) tea.Cmd {
 	return func() tea.Msg {
-		session := sessionName
-		if session == "" {
-			var err error
-			session, err = tmux.CurrentSessionName(runner)
-			if err != nil {
-				return OpenVimResultMsg{Err: fmt.Errorf("セッション名の取得に失敗: %w", err)}
-			}
+		if err := starter("zed", filePath); err != nil {
+			return OpenEditorResultMsg{Err: fmt.Errorf("zedの起動に失敗: %w", err)}
 		}
-
-		targets := centerPaneTargets(session)
-		mainCenter := targets[0]
-
-		idleTarget := ""
-		for _, target := range targets {
-			cmd, err := tmux.PaneCurrentCommand(runner, target)
-			if err != nil {
-				continue
-			}
-			if isShellCommand(cmd) {
-				idleTarget = target
-				break
-			}
-		}
-
-		if idleTarget == "" {
-			return OpenVimResultMsg{Err: fmt.Errorf("利用可能なcenter paneがありません")}
-		}
-
-		cmd := "vim " + shellEscape(filePath)
-		if err := tmux.SendKeys(runner, idleTarget, cmd); err != nil {
-			return OpenVimResultMsg{Err: fmt.Errorf("vimの起動に失敗: %w", err)}
-		}
-
-		// Swap the idle pane to main-window center if it's in the background
-		if idleTarget != mainCenter {
-			if _, err := runner.Run("swap-pane", "-d", "-s", idleTarget, "-t", mainCenter); err != nil {
-				return OpenVimResultMsg{Err: fmt.Errorf("paneの入れ替えに失敗: %w", err)}
-			}
-		}
-
-		if err := tmux.SelectPane(runner, mainCenter); err != nil {
-			return OpenVimResultMsg{Err: fmt.Errorf("paneのフォーカスに失敗: %w", err)}
-		}
-
-		return OpenVimResultMsg{}
+		return OpenEditorResultMsg{}
 	}
 }
 
@@ -415,11 +340,6 @@ func openPRInBrowserCmd(url string) tea.Cmd {
 		err := cmd.Start()
 		return OpenPRResultMsg{Err: err}
 	}
-}
-
-// shellEscape wraps a string in single quotes for safe shell usage.
-func shellEscape(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // === Data Fetching Commands ===
