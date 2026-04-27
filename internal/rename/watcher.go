@@ -12,14 +12,20 @@ import (
 	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
+const (
+	maxRenameAttempts         = 3
+	defaultRenameRetryBackoff = 2 * time.Second
+)
+
 // WatcherConfig holds the parameters for a rename watcher.
 type WatcherConfig struct {
-	WorktreePath string
-	Branch       string
-	SessionName  string
-	CreatedAt    int64
-	PollInterval time.Duration
-	Timeout      time.Duration
+	WorktreePath       string
+	Branch             string
+	SessionName        string
+	CreatedAt          int64
+	PollInterval       time.Duration
+	Timeout            time.Duration
+	RenameRetryBackoff time.Duration
 }
 
 // Watcher polls Claude history for a first prompt and renames the branch accordingly.
@@ -70,11 +76,33 @@ func (w *Watcher) Run() error {
 		prompt, found := w.findPrompt()
 		if found {
 			w.logf("prompt detected: %q for path=%q", prompt, w.config.WorktreePath)
-			return w.renameBranch(prompt)
+			return w.renameBranchWithRetry(prompt)
 		}
 
 		time.Sleep(w.config.PollInterval)
 	}
+}
+
+func (w *Watcher) renameBranchWithRetry(prompt string) error {
+	backoff := w.config.RenameRetryBackoff
+	if backoff <= 0 {
+		backoff = defaultRenameRetryBackoff
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRenameAttempts; attempt++ {
+		w.logf("renameBranch attempt %d/%d", attempt, maxRenameAttempts)
+		if err := w.renameBranch(prompt); err != nil {
+			lastErr = err
+			w.logf("renameBranch attempt %d/%d failed: %v", attempt, maxRenameAttempts, err)
+			if attempt < maxRenameAttempts {
+				time.Sleep(backoff)
+			}
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("renaming branch failed after %d attempts: %w", maxRenameAttempts, lastErr)
 }
 
 func (w *Watcher) findPrompt() (string, bool) {
