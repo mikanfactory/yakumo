@@ -69,6 +69,22 @@ func TestEnsureMainSession_CreatesNew(t *testing.T) {
 	if !found {
 		t.Error("expected new-session to be called")
 	}
+
+	logoSent := false
+	for _, call := range runner2.calls {
+		if len(call) == 5 &&
+			call[0] == "send-keys" &&
+			call[1] == "-t" &&
+			call[2] == MainSessionName &&
+			call[3] == yakumoLogoCommand &&
+			call[4] == "Enter" {
+			logoSent = true
+			break
+		}
+	}
+	if !logoSent {
+		t.Errorf("expected send-keys to deliver %q to %s, got calls: %v", yakumoLogoCommand, MainSessionName, runner2.calls)
+	}
 }
 
 func TestEnsureMainSession_CreateError(t *testing.T) {

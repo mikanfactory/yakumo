@@ -8,15 +8,10 @@ import (
 // MainSessionName is the name of the yakumo main tmux session.
 const MainSessionName = "yakumo-main"
 
-const yakumoASCIIArt = ` ██╗   ██╗  █████╗  ██╗  ██╗ ██╗   ██╗ ███╗   ███╗  ██████╗
- ╚██╗ ██╔╝ ██╔══██╗ ██║ ██╔╝ ██║   ██║ ████╗ ████║ ██╔═══██╗
-  ╚████╔╝  ███████║ █████╔╝  ██║   ██║ ██╔████╔██║ ██║   ██║
-   ╚██╔╝   ██╔══██║ ██╔═██╗  ██║   ██║ ██║╚██╔╝██║ ██║   ██║
-    ██║    ██║  ██║ ██║  ██╗ ╚██████╔╝ ██║ ╚═╝ ██║ ╚██████╔╝
-    ╚═╝    ╚═╝  ╚═╝ ╚═╝  ╚═╝  ╚═════╝  ╚═╝     ╚═╝  ╚═════╝`
+const yakumoLogoCommand = `npx oh-my-logo "yakumo" ocean --filled --block-font block`
 
 // EnsureMainSession checks if the yakumo main session exists, and creates it if not.
-// When creating a new session, it sends the ASCII art banner via echo.
+// When creating a new session, it displays the yakumo logo via npx oh-my-logo.
 func EnsureMainSession(runner Runner) error {
 	exists, err := HasSession(runner, MainSessionName)
 	if err != nil {
@@ -35,8 +30,8 @@ func EnsureMainSession(runner Runner) error {
 		return fmt.Errorf("creating main session: %w", err)
 	}
 
-	// Display ASCII art banner (non-fatal)
-	SendKeys(runner, MainSessionName, "echo '"+yakumoASCIIArt+"'")
+	// Display yakumo logo (non-fatal)
+	SendKeys(runner, MainSessionName, yakumoLogoCommand)
 
 	return nil
 }
