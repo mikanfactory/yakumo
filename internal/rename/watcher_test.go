@@ -3,6 +3,7 @@ package rename
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -14,6 +15,68 @@ import (
 	"github.com/mikanfactory/yakumo/internal/git"
 	"github.com/mikanfactory/yakumo/internal/tmux"
 )
+
+// pickSeq returns xs[i], clamping i to the last index. Zero value if xs is empty.
+func pickSeq[T any](xs []T, i int) T {
+	var zero T
+	if len(xs) == 0 {
+		return zero
+	}
+	if i >= len(xs) {
+		i = len(xs) - 1
+	}
+	return xs[i]
+}
+
+type sequenceGenerator struct {
+	results []string
+	errs    []error
+	calls   int
+}
+
+func (g *sequenceGenerator) GenerateBranchName(_ string) (string, error) {
+	i := g.calls
+	g.calls++
+	return pickSeq(g.results, i), pickSeq(g.errs, i)
+}
+
+type cmdResult struct {
+	out string
+	err error
+}
+
+// sequenceCommandRunner implements git.CommandRunner and switches behavior
+// based on the number of times a given key has been seen. `sequence[key]`
+// lists outcomes per call (last entry repeats once exhausted). Falls back
+// to outputs/errors maps when a key has no sequence configured.
+type sequenceCommandRunner struct {
+	outputs  map[string]string
+	errors   map[string]error
+	sequence map[string][]cmdResult
+	calls    map[string]int
+}
+
+func (r *sequenceCommandRunner) Run(dir string, args ...string) (string, error) {
+	if r.calls == nil {
+		r.calls = map[string]int{}
+	}
+	key := fmt.Sprintf("%s:%v", dir, args)
+	if seq, ok := r.sequence[key]; ok && len(seq) > 0 {
+		idx := r.calls[key]
+		r.calls[key]++
+		res := pickSeq(seq, idx)
+		return res.out, res.err
+	}
+	if err, ok := r.errors[key]; ok {
+		r.calls[key]++
+		return "", err
+	}
+	if out, ok := r.outputs[key]; ok {
+		r.calls[key]++
+		return out, nil
+	}
+	return "", fmt.Errorf("sequenceCommandRunner: no output for key %q", key)
+}
 
 func makeHistory(project, display string, timestamp int64) []byte {
 	entry := claude.HistoryEntry{
@@ -89,20 +152,34 @@ func TestWatcher_Run_LLMError(t *testing.T) {
 	runner := git.FakeCommandRunner{Outputs: map[string]string{}}
 
 	cfg := WatcherConfig{
-		WorktreePath: wtPath,
-		Branch:       "shoji/south-korea",
-		CreatedAt:    createdAt,
-		PollInterval: 10 * time.Millisecond,
-		Timeout:      1 * time.Second,
+		WorktreePath:       wtPath,
+		Branch:             "shoji/south-korea",
+		CreatedAt:          createdAt,
+		PollInterval:       10 * time.Millisecond,
+		Timeout:            1 * time.Second,
+		RenameRetryBackoff: 1 * time.Millisecond,
 	}
 
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", 0)
+
 	w := NewWatcher(cfg, reader, gen, runner, nil)
+	w.SetLogger(logger)
 	err := w.Run()
 	if err == nil {
 		t.Fatal("expected LLM error, got nil")
 	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", maxRenameAttempts)) {
+		t.Errorf("error should mention 'after 3 attempts', got: %v", err)
+	}
 	if !strings.Contains(err.Error(), "generating branch name") {
-		t.Errorf("error should mention generating branch name, got: %v", err)
+		t.Errorf("error should wrap generating branch name error, got: %v", err)
+	}
+	output := buf.String()
+	for _, phrase := range []string{"attempt 1/3", "attempt 2/3", "attempt 3/3"} {
+		if !strings.Contains(output, phrase) {
+			t.Errorf("log output should contain %q, got:\n%s", phrase, output)
+		}
 	}
 }
 
@@ -121,11 +198,12 @@ func TestWatcher_Run_RenameError(t *testing.T) {
 	}
 
 	cfg := WatcherConfig{
-		WorktreePath: wtPath,
-		Branch:       "shoji/south-korea",
-		CreatedAt:    createdAt,
-		PollInterval: 10 * time.Millisecond,
-		Timeout:      1 * time.Second,
+		WorktreePath:       wtPath,
+		Branch:             "shoji/south-korea",
+		CreatedAt:          createdAt,
+		PollInterval:       10 * time.Millisecond,
+		Timeout:            1 * time.Second,
+		RenameRetryBackoff: 1 * time.Millisecond,
 	}
 
 	w := NewWatcher(cfg, reader, gen, runner, nil)
@@ -133,8 +211,11 @@ func TestWatcher_Run_RenameError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected rename error, got nil")
 	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", maxRenameAttempts)) {
+		t.Errorf("error should mention 'after 3 attempts', got: %v", err)
+	}
 	if !strings.Contains(err.Error(), "renaming branch") {
-		t.Errorf("error should mention renaming branch, got: %v", err)
+		t.Errorf("error should wrap renaming branch error, got: %v", err)
 	}
 }
 
@@ -209,17 +290,21 @@ func TestWatcher_Run_EmptyBranchName(t *testing.T) {
 	runner := git.FakeCommandRunner{Outputs: map[string]string{}}
 
 	cfg := WatcherConfig{
-		WorktreePath: wtPath,
-		Branch:       "shoji/south-korea",
-		CreatedAt:    createdAt,
-		PollInterval: 10 * time.Millisecond,
-		Timeout:      1 * time.Second,
+		WorktreePath:       wtPath,
+		Branch:             "shoji/south-korea",
+		CreatedAt:          createdAt,
+		PollInterval:       10 * time.Millisecond,
+		Timeout:            1 * time.Second,
+		RenameRetryBackoff: 1 * time.Millisecond,
 	}
 
 	w := NewWatcher(cfg, reader, gen, runner, nil)
 	err := w.Run()
 	if err == nil {
 		t.Fatal("expected error for empty branch name, got nil")
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", maxRenameAttempts)) {
+		t.Errorf("error should mention 'after 3 attempts', got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "empty") {
 		t.Errorf("error should mention empty, got: %v", err)
@@ -516,5 +601,147 @@ func TestWatcher_Run_RenamesTmuxSession_FallbackToSlug(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected rename-session with resolved name, calls: %v", tmuxRunner.Calls)
+	}
+}
+
+func TestWatcher_Run_RetryRecoversAfterLLMError(t *testing.T) {
+	wtPath := "/Users/shoji/yakumo/south-korea"
+	createdAt := time.Now().UnixMilli()
+
+	historyData := makeHistory(wtPath, "implement user dashboard with charts", createdAt+1000)
+
+	reader := claude.FakeReader{Data: historyData}
+	gen := &sequenceGenerator{
+		results: []string{"", "add-jwt-auth"},
+		errs:    []error{fmt.Errorf("LLM service unavailable"), nil},
+	}
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			fmt.Sprintf("%s:[branch -m shoji/south-korea shoji/add-jwt-auth]", wtPath): "",
+		},
+	}
+
+	cfg := WatcherConfig{
+		WorktreePath:       wtPath,
+		Branch:             "shoji/south-korea",
+		CreatedAt:          createdAt,
+		PollInterval:       10 * time.Millisecond,
+		Timeout:            1 * time.Second,
+		RenameRetryBackoff: 1 * time.Millisecond,
+	}
+
+	w := NewWatcher(cfg, reader, gen, runner, nil)
+	err := w.Run()
+	if err != nil {
+		t.Fatalf("expected success after retry, got error: %v", err)
+	}
+	if gen.calls != 2 {
+		t.Errorf("expected 2 generator calls, got %d", gen.calls)
+	}
+}
+
+func TestWatcher_Run_RetryRecoversAfterEmptySanitize(t *testing.T) {
+	wtPath := "/Users/shoji/yakumo/south-korea"
+	createdAt := time.Now().UnixMilli()
+
+	historyData := makeHistory(wtPath, "implement user dashboard with charts", createdAt+1000)
+
+	reader := claude.FakeReader{Data: historyData}
+	gen := &sequenceGenerator{
+		results: []string{"---", "add-jwt-auth"},
+		errs:    []error{nil, nil},
+	}
+	runner := git.FakeCommandRunner{
+		Outputs: map[string]string{
+			fmt.Sprintf("%s:[branch -m shoji/south-korea shoji/add-jwt-auth]", wtPath): "",
+		},
+	}
+
+	cfg := WatcherConfig{
+		WorktreePath:       wtPath,
+		Branch:             "shoji/south-korea",
+		CreatedAt:          createdAt,
+		PollInterval:       10 * time.Millisecond,
+		Timeout:            1 * time.Second,
+		RenameRetryBackoff: 1 * time.Millisecond,
+	}
+
+	w := NewWatcher(cfg, reader, gen, runner, nil)
+	err := w.Run()
+	if err != nil {
+		t.Fatalf("expected success after retry, got error: %v", err)
+	}
+	if gen.calls != 2 {
+		t.Errorf("expected 2 generator calls, got %d", gen.calls)
+	}
+}
+
+func TestWatcher_Run_RetryRecoversAfterGitError(t *testing.T) {
+	wtPath := "/Users/shoji/yakumo/south-korea"
+	createdAt := time.Now().UnixMilli()
+
+	historyData := makeHistory(wtPath, "implement user dashboard with charts", createdAt+1000)
+
+	reader := claude.FakeReader{Data: historyData}
+	gen := branchname.FakeGenerator{Result: "add-jwt-auth"}
+	renameKey := fmt.Sprintf("%s:[branch -m shoji/south-korea shoji/add-jwt-auth]", wtPath)
+	runner := &sequenceCommandRunner{
+		sequence: map[string][]cmdResult{
+			renameKey: {
+				{out: "", err: fmt.Errorf("transient git error")},
+				{out: "", err: nil},
+			},
+		},
+	}
+
+	cfg := WatcherConfig{
+		WorktreePath:       wtPath,
+		Branch:             "shoji/south-korea",
+		CreatedAt:          createdAt,
+		PollInterval:       10 * time.Millisecond,
+		Timeout:            1 * time.Second,
+		RenameRetryBackoff: 1 * time.Millisecond,
+	}
+
+	w := NewWatcher(cfg, reader, gen, runner, nil)
+	err := w.Run()
+	if err != nil {
+		t.Fatalf("expected success after retry, got error: %v", err)
+	}
+	if got := runner.calls[renameKey]; got != 2 {
+		t.Errorf("expected branch -m to be invoked twice, got %d", got)
+	}
+}
+
+func TestWatcher_Run_AllAttemptsFailErrorWrapping(t *testing.T) {
+	wtPath := "/Users/shoji/yakumo/south-korea"
+	createdAt := time.Now().UnixMilli()
+
+	historyData := makeHistory(wtPath, "implement user dashboard with charts", createdAt+1000)
+
+	llmErr := fmt.Errorf("LLM service unavailable")
+	reader := claude.FakeReader{Data: historyData}
+	gen := branchname.FakeGenerator{Err: llmErr}
+	runner := git.FakeCommandRunner{Outputs: map[string]string{}}
+
+	cfg := WatcherConfig{
+		WorktreePath:       wtPath,
+		Branch:             "shoji/south-korea",
+		CreatedAt:          createdAt,
+		PollInterval:       10 * time.Millisecond,
+		Timeout:            1 * time.Second,
+		RenameRetryBackoff: 1 * time.Millisecond,
+	}
+
+	w := NewWatcher(cfg, reader, gen, runner, nil)
+	err := w.Run()
+	if err == nil {
+		t.Fatal("expected error after all attempts fail, got nil")
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", maxRenameAttempts)) {
+		t.Errorf("error should mention attempts count, got: %v", err)
+	}
+	if !errors.Is(err, llmErr) {
+		t.Errorf("error should wrap original LLM error via errors.Is, got: %v", err)
 	}
 }
