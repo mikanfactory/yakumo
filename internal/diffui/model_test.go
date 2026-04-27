@@ -5,58 +5,21 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
-func TestIsShellCommand(t *testing.T) {
-	tests := []struct {
-		cmd  string
-		want bool
-	}{
-		{"zsh", true},
-		{"-zsh", true},
-		{"bash", true},
-		{"-bash", true},
-		{"fish", true},
-		{"sh", true},
-		{"dash", true},
-		{"ksh", true},
-		{"ZSH", true},
-		{"node", false},
-		{"claude", false},
-		{"vim", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.cmd, func(t *testing.T) {
-			got := isShellCommand(tt.cmd)
-			if got != tt.want {
-				t.Errorf("isShellCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestEnterOpensVimInIdleCenterPane(t *testing.T) {
-	t.Setenv("TMUX_PANE", "")
-
-	runner := &tmux.FakeRunner{
-		Outputs: map[string]string{
-			"[display-message -p -t dev:main-window.0 #{pane_current_command}]":       "node",
-			"[display-message -p -t dev:background-window.0 #{pane_current_command}]": "zsh",
-			"[send-keys -t dev:background-window.0 vim '/repo/file.go' Enter]":        "",
-			"[swap-pane -d -s dev:background-window.0 -t dev:main-window.0]":          "",
-			"[select-pane -t dev:main-window.0]":                                      "",
-		},
+func TestEnterOpensZedOnChangesTab(t *testing.T) {
+	var gotName string
+	var gotArgs []string
+	starter := func(name string, args ...string) error {
+		gotName = name
+		gotArgs = args
+		return nil
 	}
 
 	m := Model{
-		activeTab:   TabChanges,
-		repoDir:     "/repo",
-		tmuxRunner:  runner,
-		sessionName: "dev",
+		activeTab:     TabChanges,
+		repoDir:       "/repo",
+		editorStarter: starter,
 		changes: ChangesModel{
 			files:  []ChangedFile{{Path: "file.go"}},
 			cursor: 0,
@@ -69,85 +32,31 @@ func TestEnterOpensVimInIdleCenterPane(t *testing.T) {
 	}
 
 	result := cmd()
-
-	msg, ok := result.(OpenVimResultMsg)
+	msg, ok := result.(OpenEditorResultMsg)
 	if !ok {
-		t.Fatalf("expected OpenVimResultMsg, got %T", result)
+		t.Fatalf("expected OpenEditorResultMsg, got %T", result)
 	}
 	if msg.Err != nil {
 		t.Errorf("expected no error, got %v", msg.Err)
 	}
 
-	// Verify: pane check (main-window.0) + pane check (bg.0) + send-keys + swap-pane + select-pane
-	// Session name is cached so no display-message call for it.
-	if len(runner.Calls) != 5 {
-		t.Fatalf("expected 5 tmux calls, got %d: %v", len(runner.Calls), runner.Calls)
+	if gotName != "zed" {
+		t.Errorf("expected command %q, got %q", "zed", gotName)
 	}
-	if runner.Calls[2][0] != "send-keys" {
-		t.Errorf("expected send-keys call, got %v", runner.Calls[2])
-	}
-	if runner.Calls[3][0] != "swap-pane" {
-		t.Errorf("expected swap-pane call, got %v", runner.Calls[3])
-	}
-	if runner.Calls[4][0] != "select-pane" {
-		t.Errorf("expected select-pane call, got %v", runner.Calls[4])
+	if len(gotArgs) != 1 || gotArgs[0] != "/repo/file.go" {
+		t.Errorf("expected args [/repo/file.go], got %v", gotArgs)
 	}
 }
 
-func TestEnterOpensVimInMainCenterPane_NoSwap(t *testing.T) {
-	t.Setenv("TMUX_PANE", "")
-
-	runner := &tmux.FakeRunner{
-		Outputs: map[string]string{
-			"[display-message -p -t dev:main-window.0 #{pane_current_command}]": "-zsh",
-			"[send-keys -t dev:main-window.0 vim '/repo/main.go' Enter]":        "",
-			"[select-pane -t dev:main-window.0]":                                "",
-		},
+func TestEnterPropagatesZedLaunchError(t *testing.T) {
+	starter := func(name string, args ...string) error {
+		return fmt.Errorf("not found")
 	}
 
 	m := Model{
-		activeTab:   TabChanges,
-		repoDir:     "/repo",
-		tmuxRunner:  runner,
-		sessionName: "dev",
-		changes: ChangesModel{
-			files:  []ChangedFile{{Path: "main.go"}},
-			cursor: 0,
-		},
-	}
-
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	result := cmd()
-
-	msg := result.(OpenVimResultMsg)
-	if msg.Err != nil {
-		t.Errorf("expected no error, got %v", msg.Err)
-	}
-
-	// No swap-pane call since idle pane is already main-window.0
-	for _, call := range runner.Calls {
-		if call[0] == "swap-pane" {
-			t.Error("should not swap when idle pane is already main-window.0")
-		}
-	}
-}
-
-func TestEnterAllCenterPanesBusy(t *testing.T) {
-	t.Setenv("TMUX_PANE", "")
-
-	runner := &tmux.FakeRunner{
-		Outputs: map[string]string{
-			"[display-message -p -t dev:main-window.0 #{pane_current_command}]":       "node",
-			"[display-message -p -t dev:background-window.0 #{pane_current_command}]": "claude",
-			"[display-message -p -t dev:background-window.1 #{pane_current_command}]": "vim",
-		},
-	}
-
-	m := Model{
-		activeTab:   TabChanges,
-		repoDir:     "/repo",
-		tmuxRunner:  runner,
-		sessionName: "dev",
+		activeTab:     TabChanges,
+		repoDir:       "/repo",
+		editorStarter: starter,
 		changes: ChangesModel{
 			files:  []ChangedFile{{Path: "file.go"}},
 			cursor: 0,
@@ -155,66 +64,24 @@ func TestEnterAllCenterPanesBusy(t *testing.T) {
 	}
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	result := cmd()
+	if cmd == nil {
+		t.Fatal("expected a command, got nil")
+	}
 
-	msg, ok := result.(OpenVimResultMsg)
+	result := cmd()
+	msg, ok := result.(OpenEditorResultMsg)
 	if !ok {
-		t.Fatalf("expected OpenVimResultMsg, got %T", result)
+		t.Fatalf("expected OpenEditorResultMsg, got %T", result)
 	}
 	if msg.Err == nil {
-		t.Fatal("expected error when all panes are busy")
+		t.Fatal("expected an error from starter, got nil")
 	}
 }
 
-func TestEnterFallsBackToCurrentSessionName(t *testing.T) {
-	t.Setenv("TMUX_PANE", "")
-	runner := &tmux.FakeRunner{
-		Outputs: map[string]string{
-			"[display-message -p #{session_name}]":                              "dev",
-			"[display-message -p -t dev:main-window.0 #{pane_current_command}]": "-zsh",
-			"[send-keys -t dev:main-window.0 vim '/repo/file.go' Enter]":        "",
-			"[select-pane -t dev:main-window.0]":                                "",
-		},
-	}
-
-	m := Model{
-		activeTab:  TabChanges,
-		repoDir:    "/repo",
-		tmuxRunner: runner,
-		// sessionName is empty — should fall back to CurrentSessionName
-		changes: ChangesModel{
-			files:  []ChangedFile{{Path: "file.go"}},
-			cursor: 0,
-		},
-	}
-
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("expected a command, got nil")
-	}
-
-	result := cmd()
-	msg, ok := result.(OpenVimResultMsg)
-	if !ok {
-		t.Fatalf("expected OpenVimResultMsg, got %T", result)
-	}
-	if msg.Err != nil {
-		t.Errorf("expected no error, got %v", msg.Err)
-	}
-
-	// Verify: display-message for session + pane check + send-keys + select-pane
-	if len(runner.Calls) != 4 {
-		t.Fatalf("expected 4 tmux calls, got %d: %v", len(runner.Calls), runner.Calls)
-	}
-	if runner.Calls[0][0] != "display-message" {
-		t.Errorf("expected display-message call for session, got %v", runner.Calls[0])
-	}
-}
-
-func TestOpenVimResultMsg_SetsStatusMsg(t *testing.T) {
+func TestOpenEditorResultMsg_SetsStatusMsg(t *testing.T) {
 	m := Model{}
 
-	updated, _ := m.Update(OpenVimResultMsg{Err: fmt.Errorf("test error")})
+	updated, _ := m.Update(OpenEditorResultMsg{Err: fmt.Errorf("test error")})
 	model := updated.(Model)
 
 	if model.statusMsg != "test error" {
@@ -236,28 +103,10 @@ func TestKeyPress_ClearsStatusMsg(t *testing.T) {
 	}
 }
 
-func TestEnterFallsBackWithoutTmux(t *testing.T) {
-	m := Model{
-		activeTab:  TabChanges,
-		repoDir:    "/repo",
-		tmuxRunner: nil,
-		changes: ChangesModel{
-			files:  []ChangedFile{{Path: "file.go"}},
-			cursor: 0,
-		},
-	}
-
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("expected a command for ExecProcess fallback, got nil")
-	}
-}
-
 func TestEnterOnEmptyFileList(t *testing.T) {
 	m := Model{
-		activeTab:  TabChanges,
-		tmuxRunner: &tmux.FakeRunner{},
-		changes:    ChangesModel{files: []ChangedFile{}},
+		activeTab: TabChanges,
+		changes:   ChangesModel{files: []ChangedFile{}},
 	}
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -268,8 +117,7 @@ func TestEnterOnEmptyFileList(t *testing.T) {
 
 func TestEnterOnChecksTab(t *testing.T) {
 	m := Model{
-		activeTab:  TabChecks,
-		tmuxRunner: &tmux.FakeRunner{},
+		activeTab: TabChecks,
 		changes: ChangesModel{
 			files: []ChangedFile{{Path: "file.go"}},
 		},
