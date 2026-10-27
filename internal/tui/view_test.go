@@ -566,14 +566,14 @@ func TestView_ShowsArchiveHint(t *testing.T) {
 func TestView_ConfirmArchiveMode(t *testing.T) {
 	m := testModel()
 	m.confirmingArchive = true
-	m.archiveTarget = m.cursor
+	m.archiveTarget = m.items[m.cursor]
 
 	view := m.View()
 
 	if !strings.Contains(view, "Archive Worktree") {
 		t.Errorf("confirm view should contain title, got:\n%s", view)
 	}
-	if !strings.Contains(view, m.items[m.archiveTarget].Label) {
+	if !strings.Contains(view, m.archiveTarget.Label) {
 		t.Errorf("confirm view should contain branch name, got:\n%s", view)
 	}
 	if !strings.Contains(view, "enter") {
@@ -590,7 +590,7 @@ func TestView_ConfirmArchiveMode(t *testing.T) {
 func TestView_ConfirmArchiveMode_WithError(t *testing.T) {
 	m := testModel()
 	m.confirmingArchive = true
-	m.archiveTarget = m.cursor
+	m.archiveTarget = m.items[m.cursor]
 	m.err = fmt.Errorf("worktree has uncommitted changes")
 
 	view := m.View()
@@ -600,16 +600,43 @@ func TestView_ConfirmArchiveMode_WithError(t *testing.T) {
 	}
 }
 
-func TestView_ConfirmArchiveMode_Loading(t *testing.T) {
+func TestView_PendingBadges(t *testing.T) {
 	m := testModel()
-	m.confirmingArchive = true
-	m.archiveTarget = m.cursor
-	m.loading = true
+	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup, "/code/repo1-feat": opArchive}
 
 	view := m.View()
 
-	if !strings.Contains(view, "Removing worktree") {
-		t.Errorf("confirm loading view should show removing message, got:\n%s", view)
+	if !strings.Contains(view, "setting up") {
+		t.Errorf("view should show setup badge, got:\n%s", view)
+	}
+	if !strings.Contains(view, "archiving") {
+		t.Errorf("view should show archive badge, got:\n%s", view)
+	}
+}
+
+func TestView_ErrorKeepsList(t *testing.T) {
+	m := testModel()
+	m.err = fmt.Errorf("remove failed")
+
+	view := m.View()
+
+	if !strings.Contains(view, "remove failed") {
+		t.Error("view should show error")
+	}
+	if !strings.Contains(view, "feature-x") {
+		t.Error("list should remain visible with error")
+	}
+}
+
+func TestView_WaitingForPendingOps(t *testing.T) {
+	m := testModel()
+	m.pendingOps = map[string]pendingOp{"/code/repo1-feat": opArchive}
+	m.quitWhenIdle = true
+
+	view := m.View()
+
+	if !strings.Contains(view, "waiting for 1 operation") {
+		t.Errorf("view should show waiting message, got:\n%s", view)
 	}
 }
 

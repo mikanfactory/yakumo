@@ -61,6 +61,12 @@ var (
 			Foreground(colorRed).
 			PaddingLeft(1)
 
+	footerErrorStyle = errorStyle.PaddingTop(1)
+
+	pendingStyle = lipgloss.NewStyle().
+			Foreground(colorYellow).
+			Italic(true)
+
 	// Agent status colors (Catppuccin-compatible)
 	colorAgentIdle    = colorGreen      // #a6e3a1
 	colorAgentRunning = colorYellow     // #f9e2af
