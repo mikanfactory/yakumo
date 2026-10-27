@@ -25,7 +25,7 @@ func (m Model) View() string {
 		return ""
 	}
 
-	if m.selected != "" {
+	if m.selected != "" && !m.quitWhenIdle {
 		return m.selected
 	}
 
@@ -45,12 +45,12 @@ func (m Model) View() string {
 		return titleStyle.Render(workspacesTitle) + "\n\n  Loading..."
 	}
 
-	if m.err != nil {
+	if m.err != nil && len(m.items) == 0 {
 		return titleStyle.Render(workspacesTitle) + "\n\n  Error: " + m.err.Error()
 	}
 
 	title := titleStyle.Render(workspacesTitle)
-	help := helpStyle.Render(workspacesHelp)
+	footer := renderFooter(m)
 
 	vp := viewportHeight(m.height)
 
@@ -63,6 +63,9 @@ func (m Model) View() string {
 		item := m.items[i]
 		isSelected := i == m.cursor
 		line := renderItem(item, isSelected, m.sidebarWidth)
+		if label := m.pendingLabel(item); label != "" {
+			line = renderWorktreeWithBadge(item, isSelected, m.sidebarWidth, pendingStyle.Render(label))
+		}
 		h := lipgloss.Height(line)
 		if vp > 0 && used+h > vp {
 			break
@@ -75,9 +78,25 @@ func (m Model) View() string {
 		used += h
 	}
 
-	b.WriteString(help)
+	b.WriteString(footer)
 
 	return zone.Scan(b.String())
+}
+
+// renderFooter replaces the help line with status text of the same height so
+// that the viewport size used for scrolling stays unchanged.
+func renderFooter(m Model) string {
+	if m.quitWhenIdle && len(m.pendingOps) > 0 {
+		return helpStyle.Render(m.pendingSummary())
+	}
+	if m.err != nil {
+		msg := "Error: " + m.err.Error()
+		if m.sidebarWidth > 0 {
+			msg = truncate(msg, m.sidebarWidth)
+		}
+		return footerErrorStyle.Render(msg)
+	}
+	return helpStyle.Render(workspacesHelp)
 }
 
 // viewportHeight returns the rows available for the items section given the
@@ -123,8 +142,11 @@ func renderItem(item model.NavigableItem, selected bool, width int) string {
 }
 
 func renderWorktree(item model.NavigableItem, selected bool, width int) string {
+	return renderWorktreeWithBadge(item, selected, width, FormatStatus(item.Status))
+}
+
+func renderWorktreeWithBadge(item model.NavigableItem, selected bool, width int, statusBadge string) string {
 	agentIcon := AgentIcon(item.AgentStatus)
-	statusBadge := FormatStatus(item.Status)
 	branchName := item.Label
 
 	// Use inline styles to avoid PaddingLeft double-application when
@@ -173,13 +195,7 @@ func renderArchiveConfirmView(m Model) string {
 	b.WriteString(titleStyle.Render("Archive Worktree"))
 	b.WriteString("\n\n")
 
-	if m.loading {
-		b.WriteString("  Removing worktree...")
-		return b.String()
-	}
-
-	item := m.items[m.archiveTarget]
-	b.WriteString(fmt.Sprintf("  Remove worktree '%s'?\n", item.Label))
+	b.WriteString(fmt.Sprintf("  Remove worktree '%s'?\n", m.archiveTarget.Label))
 	b.WriteString("  The branch will be preserved.\n")
 
 	if m.err != nil {

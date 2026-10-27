@@ -1068,8 +1068,8 @@ func TestUpdate_D_OnWorktree_EntersConfirmMode(t *testing.T) {
 	if !updated.confirmingArchive {
 		t.Error("confirmingArchive should be true")
 	}
-	if updated.archiveTarget != m.cursor {
-		t.Errorf("archiveTarget = %d, want %d", updated.archiveTarget, m.cursor)
+	if updated.archiveTarget.WorktreePath != m.items[m.cursor].WorktreePath {
+		t.Errorf("archiveTarget = %q, want %q", updated.archiveTarget.WorktreePath, m.items[m.cursor].WorktreePath)
 	}
 	if cmd != nil {
 		t.Error("should not return a command")
@@ -1109,7 +1109,7 @@ func TestUpdate_D_OnNonWorktree_NoOp(t *testing.T) {
 func TestUpdate_ConfirmArchiveMode_Escape_Cancels(t *testing.T) {
 	m := testModel()
 	m.confirmingArchive = true
-	m.archiveTarget = m.cursor
+	m.archiveTarget = m.items[m.cursor]
 	m.err = fmt.Errorf("previous error")
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
@@ -1123,17 +1123,23 @@ func TestUpdate_ConfirmArchiveMode_Escape_Cancels(t *testing.T) {
 	}
 }
 
-func TestUpdate_ConfirmArchiveMode_Enter_Confirms(t *testing.T) {
+func TestUpdate_ConfirmArchiveMode_Enter_RunsInBackground(t *testing.T) {
 	m := testModel()
 	m.confirmingArchive = true
-	m.archiveTarget = m.cursor
+	m.archiveTarget = m.items[m.cursor]
 	m.runner = &fakeRunner{}
 
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := result.(Model)
 
-	if !updated.loading {
-		t.Error("loading should be true after confirming archive")
+	if updated.loading {
+		t.Error("loading should stay false while archiving in background")
+	}
+	if updated.confirmingArchive {
+		t.Error("confirm modal should close immediately after confirming")
+	}
+	if updated.pendingOps[m.archiveTarget.WorktreePath] != opArchive {
+		t.Error("target worktree should be marked as archiving")
 	}
 	if cmd == nil {
 		t.Error("expected archiveWorktreeCmd to be returned")
@@ -1143,7 +1149,7 @@ func TestUpdate_ConfirmArchiveMode_Enter_Confirms(t *testing.T) {
 func TestUpdate_ConfirmArchiveMode_CtrlC_Quits(t *testing.T) {
 	m := testModel()
 	m.confirmingArchive = true
-	m.archiveTarget = m.cursor
+	m.archiveTarget = m.items[m.cursor]
 
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	updated := result.(Model)
@@ -1159,7 +1165,7 @@ func TestUpdate_ConfirmArchiveMode_CtrlC_Quits(t *testing.T) {
 func TestUpdate_ConfirmArchiveMode_QBlocked(t *testing.T) {
 	m := testModel()
 	m.confirmingArchive = true
-	m.archiveTarget = m.cursor
+	m.archiveTarget = m.items[m.cursor]
 
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	updated := result.(Model)
@@ -1174,21 +1180,29 @@ func TestUpdate_ConfirmArchiveMode_QBlocked(t *testing.T) {
 
 func TestUpdate_WorktreeArchivedMsg(t *testing.T) {
 	m := testModel()
-	m.confirmingArchive = true
-	m.archiveTarget = m.cursor
+	target := m.items[m.cursor]
+	m.pendingOps = map[string]pendingOp{target.WorktreePath: opArchive}
 	m.runner = &fakeRunner{}
 	m.config = model.Config{
 		Repositories: []model.RepositoryDef{{Name: "test", Path: "/test"}},
 	}
 
-	result, cmd := m.Update(WorktreeArchivedMsg{})
+	result, cmd := m.Update(WorktreeArchivedMsg{WorktreePath: target.WorktreePath})
 	updated := result.(Model)
 
-	if !updated.loading {
-		t.Error("loading should be true after WorktreeArchivedMsg (refreshing)")
+	if updated.loading {
+		t.Error("loading should stay false while refreshing in background")
 	}
-	if updated.confirmingArchive {
-		t.Error("confirmingArchive should be false after success")
+	if _, ok := updated.pendingOps[target.WorktreePath]; ok {
+		t.Error("pending op should be cleared")
+	}
+	for _, item := range updated.items {
+		if item.WorktreePath == target.WorktreePath {
+			t.Error("archived worktree should be removed from items immediately")
+		}
+	}
+	if !updated.items[updated.cursor].Selectable {
+		t.Error("cursor should be on a selectable item")
 	}
 	if cmd == nil {
 		t.Error("expected fetchGitDataCmd to be returned")
@@ -1197,20 +1211,320 @@ func TestUpdate_WorktreeArchivedMsg(t *testing.T) {
 
 func TestUpdate_WorktreeArchiveErrMsg(t *testing.T) {
 	m := testModel()
-	m.confirmingArchive = true
-	m.archiveTarget = m.cursor
+	target := m.items[m.cursor]
+	m.pendingOps = map[string]pendingOp{target.WorktreePath: opArchive}
 
-	result, _ := m.Update(WorktreeArchiveErrMsg{Err: fmt.Errorf("remove failed")})
+	result, _ := m.Update(WorktreeArchiveErrMsg{WorktreePath: target.WorktreePath, Err: fmt.Errorf("remove failed")})
 	updated := result.(Model)
 
-	if updated.loading {
-		t.Error("loading should be false after archive error")
-	}
 	if updated.err == nil {
 		t.Error("err should be set")
 	}
-	if updated.confirmingArchive {
-		t.Error("confirmingArchive should be false after error")
+	if _, ok := updated.pendingOps[target.WorktreePath]; ok {
+		t.Error("pending op should be cleared")
+	}
+}
+
+func TestUpdate_CursorMovesWhileArchiving(t *testing.T) {
+	m := testModel()
+	m.confirmingArchive = true
+	m.archiveTarget = m.items[m.cursor]
+	m.runner = &fakeRunner{}
+	initial := m.cursor
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	result, _ = result.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	updated := result.(Model)
+
+	if updated.cursor <= initial {
+		t.Errorf("cursor should move while archiving, got %d (initial %d)", updated.cursor, initial)
+	}
+}
+
+func TestUpdate_PendingWorktree_IgnoresDAndEnter(t *testing.T) {
+	m := testModel()
+	path := m.items[m.cursor].WorktreePath
+	m.pendingOps = map[string]pendingOp{path: opArchive}
+	m.sessionSetup = func(string, string) error { return nil }
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	updated := result.(Model)
+	if updated.confirmingArchive || cmd != nil {
+		t.Error("d should be ignored on a pending worktree")
+	}
+
+	result, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = result.(Model)
+	if updated.selected != "" || cmd != nil {
+		t.Error("enter should be ignored on a pending worktree")
+	}
+}
+
+func TestUpdate_ParallelArchives(t *testing.T) {
+	m := testModel()
+	m.runner = &fakeRunner{}
+	first := m.items[m.cursor]
+
+	m.archiveTarget = first
+	m.confirmingArchive = true
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = result.(Model)
+	second := m.items[m.cursor]
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = result.(Model)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+
+	if len(m.pendingOps) != 2 {
+		t.Fatalf("expected 2 pending ops, got %d", len(m.pendingOps))
+	}
+
+	result, _ = m.Update(WorktreeArchivedMsg{WorktreePath: second.WorktreePath})
+	m = result.(Model)
+	result, _ = m.Update(WorktreeArchiveErrMsg{WorktreePath: first.WorktreePath, Err: fmt.Errorf("x")})
+	m = result.(Model)
+
+	if len(m.pendingOps) != 0 {
+		t.Errorf("all pending ops should be cleared, got %v", m.pendingOps)
+	}
+}
+
+func TestUpdate_ArchiveCompletesWhileModalOpen(t *testing.T) {
+	m := testModel()
+	path := m.items[m.cursor].WorktreePath
+	m.pendingOps = map[string]pendingOp{path: opArchive}
+	m.runner = &fakeRunner{}
+	m.addingWorktree = true
+
+	result, cmd := m.Update(WorktreeArchivedMsg{WorktreePath: path})
+	updated := result.(Model)
+
+	if _, ok := updated.pendingOps[path]; ok {
+		t.Error("archive completion must be handled even while a modal is open")
+	}
+	if !updated.addingWorktree {
+		t.Error("modal should stay open")
+	}
+	if cmd == nil {
+		t.Error("expected refresh cmd")
+	}
+}
+
+func TestUpdate_GitDataMsg_PreservesCursor(t *testing.T) {
+	m := testModel()
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = result.(Model)
+	want := m.items[m.cursor].WorktreePath
+
+	groups := []model.RepoGroup{
+		{
+			Name:     "repo1",
+			RootPath: "/code/repo1",
+			Worktrees: []model.WorktreeInfo{
+				{Path: "/code/repo1", Branch: "main"},
+				{Path: "/code/repo1-new", Branch: "new"},
+				{Path: "/code/repo1-feat", Branch: "feature-x"},
+			},
+		},
+	}
+	result, _ = m.Update(GitDataMsg{Groups: groups})
+	updated := result.(Model)
+
+	if got := updated.items[updated.cursor].WorktreePath; got != want {
+		t.Errorf("cursor on %q, want %q", got, want)
+	}
+}
+
+func TestUpdate_GitDataMsg_CursorFallsBackWhenItemRemoved(t *testing.T) {
+	m := testModel()
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = result.(Model)
+
+	groups := []model.RepoGroup{
+		{
+			Name:      "repo1",
+			RootPath:  "/code/repo1",
+			Worktrees: []model.WorktreeInfo{{Path: "/code/repo1", Branch: "main"}},
+		},
+	}
+	result, _ = m.Update(GitDataMsg{Groups: groups})
+	updated := result.(Model)
+
+	if !updated.items[updated.cursor].Selectable {
+		t.Error("cursor should fall back to a selectable item")
+	}
+}
+
+func TestUpdate_GitDataMsg_KeepsAgentStatus(t *testing.T) {
+	m := testModel()
+	agents := []model.AgentInfo{{State: model.AgentStateRunning}}
+	m.agentStatus = map[string][]model.AgentInfo{"/code/repo1": agents}
+
+	result, _ := m.Update(GitDataMsg{Groups: m.groups})
+	updated := result.(Model)
+
+	for _, item := range updated.items {
+		if item.WorktreePath == "/code/repo1" && item.Kind == model.ItemKindWorktree && len(item.AgentStatus) == 0 {
+			t.Error("agent status should be re-applied after refresh")
+		}
+	}
+}
+
+func TestUpdate_GitDataMsg_DiscardsStale(t *testing.T) {
+	m := testModel()
+	m.refreshSeq = 2
+
+	result, _ := m.Update(GitDataMsg{Groups: nil, Seq: 1})
+	updated := result.(Model)
+
+	if len(updated.items) != len(m.items) {
+		t.Error("stale GitDataMsg should be ignored")
+	}
+}
+
+func TestUpdate_Enter_WithSessionSetup_RunsInBackground(t *testing.T) {
+	m := testModel()
+	m.sessionSetup = func(string, string) error { return nil }
+	path := m.items[m.cursor].WorktreePath
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := result.(Model)
+
+	if updated.selected != "" {
+		t.Error("selected should not be set until setup completes")
+	}
+	if updated.pendingOps[path] != opSetup {
+		t.Error("worktree should be marked as setting up")
+	}
+	if cmd == nil {
+		t.Fatal("expected setup cmd")
+	}
+	msg := cmd()
+	if ready, ok := msg.(SessionReadyMsg); !ok || ready.WorktreePath != path {
+		t.Fatalf("expected SessionReadyMsg for %q, got %#v", path, msg)
+	}
+
+	result, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if result.(Model).cursor == updated.cursor {
+		t.Error("cursor should move while setting up")
+	}
+}
+
+func TestUpdate_Enter_WhileOtherSetupPending_Ignored(t *testing.T) {
+	m := testModel()
+	m.sessionSetup = func(string, string) error { return nil }
+	m.pendingOps = map[string]pendingOp{"/other": opSetup}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("only one session setup should run at a time")
+	}
+}
+
+func TestSessionSetupCmd_Error(t *testing.T) {
+	cmd := sessionSetupCmd(func(string, string) error { return fmt.Errorf("boom") }, "/wt", "/repo")
+	msg := cmd()
+	if e, ok := msg.(SessionSetupErrMsg); !ok || e.WorktreePath != "/wt" {
+		t.Fatalf("expected SessionSetupErrMsg, got %#v", msg)
+	}
+}
+
+func TestUpdate_SessionReadyMsg_Quits(t *testing.T) {
+	m := testModel()
+	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup}
+
+	result, cmd := m.Update(SessionReadyMsg{WorktreePath: "/code/repo1", RepoRootPath: "/code/repo1"})
+	updated := result.(Model)
+
+	if updated.selected != "/code/repo1" {
+		t.Errorf("selected = %q", updated.selected)
+	}
+	if cmd == nil {
+		t.Error("expected tea.Quit")
+	}
+}
+
+func TestUpdate_SessionReadyMsg_WaitsForArchives(t *testing.T) {
+	m := testModel()
+	m.runner = &fakeRunner{}
+	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup, "/code/repo1-feat": opArchive}
+
+	result, cmd := m.Update(SessionReadyMsg{WorktreePath: "/code/repo1", RepoRootPath: "/code/repo1"})
+	updated := result.(Model)
+	if cmd != nil {
+		t.Error("should not quit while archive is pending")
+	}
+	if !updated.quitWhenIdle {
+		t.Error("should wait for pending ops")
+	}
+
+	result, cmd = updated.Update(WorktreeArchivedMsg{WorktreePath: "/code/repo1-feat"})
+	if cmd == nil {
+		t.Error("expected quit after last pending op")
+	}
+	if result.(Model).selected != "/code/repo1" {
+		t.Error("selected should be kept")
+	}
+}
+
+func TestUpdate_SessionSetupErrMsg(t *testing.T) {
+	m := testModel()
+	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup}
+
+	result, cmd := m.Update(SessionSetupErrMsg{WorktreePath: "/code/repo1", Err: fmt.Errorf("tmux down")})
+	updated := result.(Model)
+
+	if updated.err == nil {
+		t.Error("err should be set")
+	}
+	if len(updated.pendingOps) != 0 {
+		t.Error("pending op should be cleared")
+	}
+	if cmd != nil {
+		t.Error("should not quit on setup error")
+	}
+}
+
+func TestUpdate_Quit_WaitsForPendingOps(t *testing.T) {
+	m := testModel()
+	m.pendingOps = map[string]pendingOp{"/code/repo1-feat": opArchive}
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	updated := result.(Model)
+	if cmd != nil {
+		t.Error("q should wait for pending ops")
+	}
+	if !updated.quitWhenIdle {
+		t.Error("quitWhenIdle should be set")
+	}
+
+	result, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil || !result.(Model).quitting {
+		t.Error("second ctrl+c should force quit")
+	}
+}
+
+func TestUpdate_QuitWhenIdle_BlocksNewOps(t *testing.T) {
+	m := testModel()
+	m.pendingOps = map[string]pendingOp{"/other": opArchive}
+	m.quitWhenIdle = true
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if result.(Model).confirmingArchive {
+		t.Error("d should be ignored while waiting to quit")
+	}
+}
+
+func TestUpdate_KeyClearsError(t *testing.T) {
+	m := testModel()
+	m.err = fmt.Errorf("old")
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if result.(Model).err != nil {
+		t.Error("key press should clear background error")
 	}
 }
 

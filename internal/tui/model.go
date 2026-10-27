@@ -19,13 +19,13 @@ import (
 	"github.com/mikanfactory/yakumo/internal/github"
 	"github.com/mikanfactory/yakumo/internal/model"
 	"github.com/mikanfactory/yakumo/internal/pathcomplete"
-	"github.com/mikanfactory/yakumo/internal/sidebar"
 	"github.com/mikanfactory/yakumo/internal/tmux"
 )
 
 // GitDataMsg is sent when git data has been fetched.
 type GitDataMsg struct {
 	Groups []model.RepoGroup
+	Seq    int
 }
 
 // GitDataErrMsg is sent when git data fetching fails.
@@ -78,12 +78,37 @@ type RepoAddErrMsg struct {
 }
 
 // WorktreeArchivedMsg is sent when a worktree has been successfully archived.
-type WorktreeArchivedMsg struct{}
+type WorktreeArchivedMsg struct {
+	WorktreePath string
+}
 
 // WorktreeArchiveErrMsg is sent when worktree archiving fails.
 type WorktreeArchiveErrMsg struct {
-	Err error
+	WorktreePath string
+	Err          error
 }
+
+// SessionReadyMsg is sent when the tmux session for the selected worktree is ready.
+type SessionReadyMsg struct {
+	WorktreePath string
+	RepoRootPath string
+}
+
+// SessionSetupErrMsg is sent when tmux session setup fails.
+type SessionSetupErrMsg struct {
+	WorktreePath string
+	Err          error
+}
+
+// SessionSetupFunc prepares and switches to the tmux session for a worktree.
+type SessionSetupFunc func(worktreePath, repoRootPath string) error
+
+type pendingOp int
+
+const (
+	opSetup pendingOp = iota + 1
+	opArchive
+)
 
 // agentPollInterval is how often we poll tmux for Claude Code agent status.
 const agentPollInterval = 500 * time.Millisecond
@@ -113,8 +138,12 @@ type Model struct {
 	agentStatus            map[string][]model.AgentInfo
 	lastSuggestionDir      string
 	confirmingArchive      bool
-	archiveTarget          int
+	archiveTarget          model.NavigableItem
 	agentTickRunning       bool
+	sessionSetup           SessionSetupFunc
+	pendingOps             map[string]pendingOp
+	quitWhenIdle           bool
+	refreshSeq             int
 }
 
 // NewModel creates a new TUI model.
@@ -140,6 +169,13 @@ func NewModel(cfg model.Config, runner git.CommandRunner, configPath string, tmu
 	}
 }
 
+// WithSessionSetup makes worktree selection run setup in the background
+// and quit only after it completes.
+func (m Model) WithSessionSetup(setup SessionSetupFunc) Model {
+	m.sessionSetup = setup
+	return m
+}
+
 // Selected returns the selected worktree path, if any.
 func (m Model) Selected() string {
 	return m.selected
@@ -163,6 +199,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if next, cmd, handled := m.updateBackground(msg); handled {
+		return next, cmd
+	}
+
 	// Handle add-repo input mode
 	if m.addingRepo {
 		return m.updateAddRepoMode(msg)
@@ -180,58 +220,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 
-	case GitDataMsg:
-		m.groups = msg.Groups
-		m.items = sidebar.BuildItems(msg.Groups)
-		m.cursor = FirstSelectable(m.items)
-		m.scrollOff = 0
-		m = recomputeScroll(m)
-		m.loading = false
-		if !m.agentTickRunning {
-			m.agentTickRunning = true
-			return m, agentTickCmd()
-		}
-		return m, nil
-
-	case AgentTickMsg:
-		if len(m.groups) > 0 && m.tmuxRunner != nil {
-			return m, fetchAgentStatusCmd(m.tmuxRunner, m.runner, m.groups)
-		}
-		return m, agentTickCmd()
-
-	case AgentStatusMsg:
-		m.agentStatus = msg.Statuses
-		for i := range m.items {
-			if m.items[i].Kind == model.ItemKindWorktree {
-				m.items[i].AgentStatus = m.agentStatus[m.items[i].WorktreePath]
-			}
-		}
-
-		return m, agentTickCmd()
-
-	case GitDataErrMsg:
-		m.err = msg.Err
-		m.loading = false
-		return m, nil
-
 	case WorktreeAddedMsg:
 		m.loading = true
-		return m, fetchGitDataCmd(m.config, m.runner)
+		return m.refresh()
 
 	case WorktreeAddErrMsg:
 		m.err = msg.Err
 		m.loading = false
-		return m, nil
-
-	case WorktreeArchivedMsg:
-		m.loading = true
-		m.confirmingArchive = false
-		return m, fetchGitDataCmd(m.config, m.runner)
-
-	case WorktreeArchiveErrMsg:
-		m.err = msg.Err
-		m.loading = false
-		m.confirmingArchive = false
 		return m, nil
 
 	case RepoValidatedMsg:
@@ -255,7 +250,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.addingRepo = false
 		m.textInput.SetValue("")
 		m.loading = true
-		return m, fetchGitDataCmd(m.config, m.runner)
+		return m.refresh()
 
 	case RepoAddErrMsg:
 		m.err = msg.Err
@@ -272,10 +267,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if zone.Get(ZoneID(i)).InBounds(msg) {
 					m.cursor = i
 					m = recomputeScroll(m)
+					if m.quitWhenIdle {
+						return m, nil
+					}
 					if item.Kind == model.ItemKindWorktree {
-						m.selected = item.WorktreePath
-						m.selectedRepoPath = item.RepoRootPath
-						return m, tea.Quit
+						return m.selectWorktree(item)
 					}
 					if item.Kind == model.ItemKindAddWorktree {
 						m.addingWorktree = true
@@ -298,11 +294,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		m.err = nil
 		switch msg.String() {
 
-		case "ctrl+c", "q":
-			m.quitting = true
-			return m, tea.Quit
+		case "ctrl+c":
+			return m.requestQuit(true)
+
+		case "q":
+			return m.requestQuit(false)
 
 		case "up", "k":
 			m.cursor = PrevSelectable(m.items, m.cursor)
@@ -313,23 +312,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = recomputeScroll(m)
 
 		case "d":
+			if m.quitWhenIdle {
+				return m, nil
+			}
 			if m.cursor < len(m.items) {
 				item := m.items[m.cursor]
-				if item.Kind == model.ItemKindWorktree && !item.IsBare {
+				if item.Kind == model.ItemKindWorktree && !item.IsBare && !m.isPending(item.WorktreePath) {
 					m.confirmingArchive = true
-					m.archiveTarget = m.cursor
-					m.err = nil
+					m.archiveTarget = item
 					return m, nil
 				}
 			}
 
 		case "enter":
+			if m.quitWhenIdle {
+				return m, nil
+			}
 			if m.cursor < len(m.items) {
 				item := m.items[m.cursor]
 				if item.Kind == model.ItemKindWorktree {
-					m.selected = item.WorktreePath
-					m.selectedRepoPath = item.RepoRootPath
-					return m, tea.Quit
+					return m.selectWorktree(item)
 				}
 				if item.Kind == model.ItemKindAddWorktree {
 					m.addingWorktree = true
@@ -376,8 +378,7 @@ func (m Model) updateAddRepoMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			return m, validateRepoCmd(m.runner, path)
 		case tea.KeyCtrlC:
-			m.quitting = true
-			return m, tea.Quit
+			return m.requestQuit(true)
 		}
 
 	case PathSuggestionsMsg:
@@ -411,7 +412,7 @@ func (m Model) updateAddRepoMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textInput.SetSuggestions(nil)
 		m.lastSuggestionDir = ""
 		m.loading = true
-		return m, fetchGitDataCmd(m.config, m.runner)
+		return m.refresh()
 
 	case RepoAddErrMsg:
 		m.err = msg.Err
@@ -478,14 +479,13 @@ func (m Model) updateAddWorktreeMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, addWorktreeFromBranchNameCmd(m.runner, m.addingWorktreeRepoPath, m.config.WorktreeBasePath, repoName, input)
 		case tea.KeyCtrlC:
-			m.quitting = true
-			return m, tea.Quit
+			return m.requestQuit(true)
 		}
 
 	case WorktreeAddedMsg:
 		m.loading = true
 		m.addingWorktree = false
-		return m, fetchGitDataCmd(m.config, m.runner)
+		return m.refresh()
 
 	case WorktreeAddErrMsg:
 		m.err = msg.Err
@@ -514,25 +514,14 @@ func (m Model) updateConfirmArchiveMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			return m, nil
 		case tea.KeyEnter:
-			item := m.items[m.archiveTarget]
-			m.loading = true
+			item := m.archiveTarget
+			m.confirmingArchive = false
 			m.err = nil
+			m = m.markPending(item.WorktreePath, opArchive)
 			return m, archiveWorktreeCmd(m.runner, m.tmuxRunner, item.RepoRootPath, item.WorktreePath)
 		case tea.KeyCtrlC:
-			m.quitting = true
-			return m, tea.Quit
+			return m.requestQuit(true)
 		}
-
-	case WorktreeArchivedMsg:
-		m.loading = true
-		m.confirmingArchive = false
-		return m, fetchGitDataCmd(m.config, m.runner)
-
-	case WorktreeArchiveErrMsg:
-		m.err = msg.Err
-		m.loading = false
-		m.confirmingArchive = false
-		return m, nil
 	}
 
 	return m, nil
@@ -565,7 +554,7 @@ func archiveWorktreeCmd(runner git.CommandRunner, tmuxRunner tmux.Runner, repoRo
 		}
 
 		if err := git.RemoveWorktree(runner, repoRootPath, worktreePath); err != nil {
-			return WorktreeArchiveErrMsg{Err: err}
+			return WorktreeArchiveErrMsg{WorktreePath: worktreePath, Err: err}
 		}
 
 		// Clean up directory if it still remains
@@ -573,7 +562,7 @@ func archiveWorktreeCmd(runner git.CommandRunner, tmuxRunner tmux.Runner, repoRo
 			os.RemoveAll(worktreePath)
 		}
 
-		return WorktreeArchivedMsg{}
+		return WorktreeArchivedMsg{WorktreePath: worktreePath}
 	}
 }
 

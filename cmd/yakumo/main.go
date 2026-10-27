@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
@@ -18,7 +17,7 @@ import (
 	"github.com/mikanfactory/yakumo/internal/git"
 	"github.com/mikanfactory/yakumo/internal/github"
 	"github.com/mikanfactory/yakumo/internal/model"
-	"github.com/mikanfactory/yakumo/internal/setupspinner"
+	"github.com/mikanfactory/yakumo/internal/sessionsetup"
 	"github.com/mikanfactory/yakumo/internal/tmux"
 	"github.com/mikanfactory/yakumo/internal/tui"
 )
@@ -136,6 +135,9 @@ func runWorktreeUI(configPath string) {
 	}
 
 	m := tui.NewModel(cfg, runner, resolvedConfigPath, tmuxRunner, ghRunner)
+	if tmuxRunner != nil {
+		m = m.WithSessionSetup(newSessionSetup(cfg, tmuxRunner, runner))
+	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	result, err := p.Run()
@@ -145,87 +147,38 @@ func runWorktreeUI(configPath string) {
 	}
 
 	finalModel, ok := result.(tui.Model)
-	if !ok || finalModel.Selected() == "" {
+	if !ok || finalModel.Selected() == "" || tmuxRunner != nil {
 		return
 	}
 
-	selected := finalModel.Selected()
-
-	if tmux.IsInsideTmux() {
-		spinnerModel := setupspinner.New("Setting up workspace...")
-		spinnerProg := tea.NewProgram(spinnerModel)
-
-		go runSessionSetup(spinnerProg, cfg, finalModel, selected)
-
-		result, err := spinnerProg.Run()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		if m, ok := result.(setupspinner.Model); ok {
-			if err := m.Result(); err != nil {
-				fmt.Fprintf(os.Stderr, "tmux error: %v\n", err)
-				os.Exit(1)
-			}
-		}
-
-		return
-	}
-
-	fmt.Print(selected)
+	fmt.Print(finalModel.Selected())
 }
 
-func runSessionSetup(prog *tea.Program, cfg model.Config, finalModel tui.Model, selected string) {
-	tmuxRunner := tmux.OSRunner{}
-	gitRunner := git.OSCommandRunner{}
-	getBranch := tmux.BranchGetter(func(worktreePath string) (string, error) {
-		out, err := gitRunner.Run(worktreePath, "symbolic-ref", "--short", "HEAD")
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(out), nil
-	})
+func newSessionSetup(cfg model.Config, tmuxRunner tmux.Runner, gitRunner git.CommandRunner) tui.SessionSetupFunc {
+	claudeCommand := ""
+	if _, err := exec.LookPath("claude"); err == nil {
+		claudeCommand = "claude"
+	}
 
-	prog.Send(setupspinner.StatusMsg("Creating session..."))
-	repo := findRepoByPath(cfg, finalModel.SelectedRepoPath())
-	layout, err := tmux.SelectWorktreeSession(tmuxRunner, selected, repo.StartupCommand, getBranch)
+	return func(worktreePath, repoRootPath string) error {
+		return sessionsetup.Setup(sessionsetup.Options{
+			TmuxRunner:     tmuxRunner,
+			GitRunner:      gitRunner,
+			WorktreePath:   worktreePath,
+			StartupCommand: findRepoByPath(cfg, repoRootPath).StartupCommand,
+			DiffUICommand:  diffUICommand(),
+			ClaudeCommand:  claudeCommand,
+			TrustDirectory: trustClaudeDirectory,
+		})
+	}
+}
+
+func trustClaudeDirectory(worktreePath string) error {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		prog.Send(setupspinner.DoneMsg{Err: fmt.Errorf("tmux error: %w", err)})
-		return
+		return err
 	}
-
-	// Run additional commands only for newly created sessions
-	if layout.BottomRight1.PaneID != "" {
-		// Launch diff-ui in top-right pane
-		prog.Send(setupspinner.StatusMsg("Launching diff-ui..."))
-		if diffCmd := diffUICommand(); diffCmd != "" {
-			if err := tmux.SendKeys(tmuxRunner, layout.TopRight1.PaneID, diffCmd); err != nil {
-				log.Printf("[setup] diff-ui launch error: %v", err)
-			}
-		}
-
-		// Ensure claude trust and launch claude CLI in center pane
-		prog.Send(setupspinner.StatusMsg("Launching Claude..."))
-		if _, err := exec.LookPath("claude"); err == nil {
-			if home, err := os.UserHomeDir(); err == nil {
-				configPath := filepath.Join(home, ".claude.json")
-				if trustErr := claude.EnsureDirectoryTrusted(configPath, selected); trustErr != nil {
-					log.Printf("[setup] claude trust warning: %v", trustErr)
-				}
-			}
-			if err := tmux.SendKeys(tmuxRunner, layout.Center1.PaneID, "claude"); err != nil {
-				log.Printf("[setup] claude launch error: %v", err)
-			}
-		}
-
-		// Focus center pane after all commands are sent
-		prog.Send(setupspinner.StatusMsg("Focusing workspace..."))
-		if err := tmux.SelectPane(tmuxRunner, layout.Center1.PaneID); err != nil {
-			log.Printf("[setup] select pane error: %v", err)
-		}
-	}
-
-	prog.Send(setupspinner.DoneMsg{})
+	return claude.EnsureDirectoryTrusted(filepath.Join(home, ".claude.json"), worktreePath)
 }
 
 func runSwapCenter() {
