@@ -136,7 +136,9 @@ func runWorktreeUI(configPath string) {
 
 	m := tui.NewModel(cfg, runner, resolvedConfigPath, tmuxRunner, ghRunner)
 	if tmuxRunner != nil {
-		m = m.WithSessionSetup(newSessionSetup(cfg, tmuxRunner, runner))
+		m = m.WithSessionSetup(newSessionSetup(cfg, tmuxRunner, runner), func(sessionName string) error {
+			return tmux.SwitchToSession(tmuxRunner, sessionName)
+		})
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
@@ -160,7 +162,7 @@ func newSessionSetup(cfg model.Config, tmuxRunner tmux.Runner, gitRunner git.Com
 		claudeCommand = "claude"
 	}
 
-	return func(worktreePath, repoRootPath string) error {
+	return func(worktreePath, repoRootPath string) (string, error) {
 		return sessionsetup.Setup(sessionsetup.Options{
 			TmuxRunner:     tmuxRunner,
 			GitRunner:      gitRunner,

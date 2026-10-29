@@ -23,9 +23,10 @@ type Options struct {
 	TrustDirectory func(worktreePath string) error
 }
 
-// Setup switches to (or creates) the tmux session for the worktree. For newly
-// created sessions it also launches diff-ui and Claude and focuses the center pane.
-func Setup(opts Options) error {
+// Setup finds or creates the tmux session for the worktree and returns its name
+// without switching the client. For newly created sessions it also launches
+// diff-ui and Claude and focuses the center pane.
+func Setup(opts Options) (string, error) {
 	var getBranch tmux.BranchGetter
 	if opts.GitRunner != nil {
 		getBranch = func(worktreePath string) (string, error) {
@@ -37,13 +38,13 @@ func Setup(opts Options) error {
 		}
 	}
 
-	layout, err := tmux.SelectWorktreeSession(opts.TmuxRunner, opts.WorktreePath, opts.StartupCommand, getBranch)
+	layout, err := tmux.EnsureWorktreeSession(opts.TmuxRunner, opts.WorktreePath, opts.StartupCommand, getBranch)
 	if err != nil {
-		return fmt.Errorf("tmux error: %w", err)
+		return "", fmt.Errorf("tmux error: %w", err)
 	}
 
 	if layout.BottomRight1.PaneID == "" {
-		return nil
+		return layout.SessionName, nil
 	}
 
 	if opts.DiffUICommand != "" {
@@ -67,5 +68,5 @@ func Setup(opts Options) error {
 		log.Printf("[setup] select pane error: %v", err)
 	}
 
-	return nil
+	return layout.SessionName, nil
 }

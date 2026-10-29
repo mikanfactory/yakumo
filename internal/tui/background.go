@@ -62,18 +62,30 @@ func (m Model) updateBackground(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case SessionReadyMsg:
 		m = m.clearPending(msg.WorktreePath)
-		m.selected = msg.WorktreePath
-		m.selectedRepoPath = msg.RepoRootPath
-		m.quitWhenIdle = true
-		next, cmd := m.quitIfIdle()
+		m = m.markReady(msg.WorktreePath, msg.SessionName)
+		next, cmd := m.finishSetupsIfDone()
 		return next, cmd, true
 
 	case SessionSetupErrMsg:
 		m = m.clearPending(msg.WorktreePath)
 		m.err = msg.Err
 		log.Printf("[setup] %s: %v", msg.WorktreePath, msg.Err)
+		next, cmd := m.finishSetupsIfDone()
+		return next, cmd, true
+
+	case SessionSwitchedMsg:
+		m = m.clearPending(msg.WorktreePath)
+		m.selected = msg.WorktreePath
+		m.selectedRepoPath = msg.RepoRootPath
 		next, cmd := m.quitIfIdle()
 		return next, cmd, true
+
+	case SessionSwitchErrMsg:
+		m = m.clearPending(msg.WorktreePath)
+		m.err = msg.Err
+		m.quitWhenIdle = false
+		log.Printf("[switch] %s: %v", msg.WorktreePath, msg.Err)
+		return m, nil, true
 	}
 
 	return m, nil, false
@@ -85,19 +97,61 @@ func (m Model) selectWorktree(item model.NavigableItem) (tea.Model, tea.Cmd) {
 		m.selectedRepoPath = item.RepoRootPath
 		return m, tea.Quit
 	}
-	if m.isPending(item.WorktreePath) || m.hasPending(opSetup) {
+	op, pending := m.pendingOps[item.WorktreePath]
+	if pending && op != opSetup {
+		return m, nil
+	}
+	m.setupTarget = item
+	if _, ready := m.readySessions[item.WorktreePath]; pending || ready {
 		return m, nil
 	}
 	m = m.markPending(item.WorktreePath, opSetup)
 	return m, sessionSetupCmd(m.sessionSetup, item.WorktreePath, item.RepoRootPath)
 }
 
+// finishSetupsIfDone switches to the last selected worktree once no setup is
+// running, so that parallel setups never fight over the tmux client.
+func (m Model) finishSetupsIfDone() (Model, tea.Cmd) {
+	if m.hasPending(opSetup) {
+		return m, nil
+	}
+	name, ok := m.readySessions[m.setupTarget.WorktreePath]
+	m.readySessions = nil
+	if !ok {
+		return m.quitIfIdle()
+	}
+	target := m.setupTarget
+	m = m.markPending(target.WorktreePath, opSetup)
+	m.quitWhenIdle = true
+	return m, sessionSwitchCmd(m.sessionSwitch, name, target)
+}
+
+func (m Model) markReady(worktreePath, sessionName string) Model {
+	ready := make(map[string]string, len(m.readySessions)+1)
+	for k, v := range m.readySessions {
+		ready[k] = v
+	}
+	ready[worktreePath] = sessionName
+	m.readySessions = ready
+	return m
+}
+
 func sessionSetupCmd(setup SessionSetupFunc, worktreePath, repoRootPath string) tea.Cmd {
 	return func() tea.Msg {
-		if err := setup(worktreePath, repoRootPath); err != nil {
+		name, err := setup(worktreePath, repoRootPath)
+		if err != nil {
 			return SessionSetupErrMsg{WorktreePath: worktreePath, Err: err}
 		}
-		return SessionReadyMsg{WorktreePath: worktreePath, RepoRootPath: repoRootPath}
+		return SessionReadyMsg{WorktreePath: worktreePath, RepoRootPath: repoRootPath, SessionName: name}
+	}
+}
+
+func sessionSwitchCmd(switchFn SessionSwitchFunc, sessionName string, target model.NavigableItem) tea.Cmd {
+	return func() tea.Msg {
+		if err := switchFn(sessionName); err != nil {
+			return SessionSwitchErrMsg{WorktreePath: target.WorktreePath, Err: err}
+		}
+		return SessionSwitchedMsg{WorktreePath: target.WorktreePath, RepoRootPath: target.RepoRootPath}
 	}
 }
 

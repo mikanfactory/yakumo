@@ -224,33 +224,22 @@ func CreateSessionLayout(runner Runner, sessionName string, startDir string, sta
 	return buildSessionLayout(sessionName, mainPaneIDs, bgPaneIDs)
 }
 
-// SelectWorktreeSession finds or creates a tmux session for the given worktree path.
-// If the session already exists, it switches to it.
-// If not, it creates the full layout and switches to the new session.
+// EnsureWorktreeSession finds or creates a tmux session for the given worktree path
+// without switching the client to it.
+// For an existing session only SessionName is set in the returned layout.
 // startupCommand is sent to the initial pane before splitting (only for new sessions).
 // getBranch is optional; when provided, it is used to resolve renamed sessions.
-func SelectWorktreeSession(runner Runner, worktreePath string, startupCommand string, getBranch BranchGetter) (SessionLayout, error) {
+func EnsureWorktreeSession(runner Runner, worktreePath string, startupCommand string, getBranch BranchGetter) (SessionLayout, error) {
 	sessionName := ResolveSessionName(runner, worktreePath, getBranch)
 
-	exists, _ := HasSession(runner, sessionName)
-
-	if exists {
-		if err := SwitchToSession(runner, sessionName); err != nil {
-			return SessionLayout{}, err
-		}
+	if exists, _ := HasSession(runner, sessionName); exists {
 		return SessionLayout{SessionName: sessionName}, nil
 	}
 
 	// For new sessions, use the default name (filepath.Base)
-	newSessionName := filepath.Base(worktreePath)
-	layout, err := CreateSessionLayout(runner, newSessionName, worktreePath, startupCommand)
+	layout, err := CreateSessionLayout(runner, filepath.Base(worktreePath), worktreePath, startupCommand)
 	if err != nil {
 		return SessionLayout{}, fmt.Errorf("creating session layout: %w", err)
 	}
-
-	if err := SwitchToSession(runner, newSessionName); err != nil {
-		return layout, fmt.Errorf("switching to new session: %w", err)
-	}
-
 	return layout, nil
 }
