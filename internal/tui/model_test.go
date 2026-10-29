@@ -1245,7 +1245,7 @@ func TestUpdate_PendingWorktree_IgnoresDAndEnter(t *testing.T) {
 	m := testModel()
 	path := m.items[m.cursor].WorktreePath
 	m.pendingOps = map[string]pendingOp{path: opArchive}
-	m.sessionSetup = func(string, string) error { return nil }
+	m.sessionSetup = func(string, string) (string, error) { return "s", nil }
 
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	updated := result.(Model)
@@ -1387,7 +1387,7 @@ func TestUpdate_GitDataMsg_DiscardsStale(t *testing.T) {
 
 func TestUpdate_Enter_WithSessionSetup_RunsInBackground(t *testing.T) {
 	m := testModel()
-	m.sessionSetup = func(string, string) error { return nil }
+	m.sessionSetup = func(string, string) (string, error) { return "s", nil }
 	path := m.items[m.cursor].WorktreePath
 
 	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1413,55 +1413,175 @@ func TestUpdate_Enter_WithSessionSetup_RunsInBackground(t *testing.T) {
 	}
 }
 
-func TestUpdate_Enter_WhileOtherSetupPending_Ignored(t *testing.T) {
+func TestUpdate_Enter_WhileOtherSetupPending_RunsInParallel(t *testing.T) {
 	m := testModel()
-	m.sessionSetup = func(string, string) error { return nil }
+	m.sessionSetup = func(string, string) (string, error) { return "s", nil }
 	m.pendingOps = map[string]pendingOp{"/other": opSetup}
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected a second setup to start")
+	}
+	if len(result.(Model).pendingOps) != 2 {
+		t.Errorf("expected 2 pending setups, got %v", result.(Model).pendingOps)
+	}
+}
+
+func TestUpdate_Enter_OnSettingUpWorktree_OnlyRetargets(t *testing.T) {
+	m := testModel()
+	m.sessionSetup = func(string, string) (string, error) { return "s", nil }
+	first := m.items[m.cursor]
+	m.pendingOps = map[string]pendingOp{first.WorktreePath: opSetup}
+	m.setupTarget = model.NavigableItem{WorktreePath: "/other"}
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
-		t.Error("only one session setup should run at a time")
+		t.Error("setup should not be started twice for the same worktree")
+	}
+	if got := result.(Model).setupTarget.WorktreePath; got != first.WorktreePath {
+		t.Errorf("setupTarget = %q, want %q", got, first.WorktreePath)
 	}
 }
 
 func TestSessionSetupCmd_Error(t *testing.T) {
-	cmd := sessionSetupCmd(func(string, string) error { return fmt.Errorf("boom") }, "/wt", "/repo")
+	cmd := sessionSetupCmd(func(string, string) (string, error) { return "", fmt.Errorf("boom") }, "/wt", "/repo")
 	msg := cmd()
 	if e, ok := msg.(SessionSetupErrMsg); !ok || e.WorktreePath != "/wt" {
 		t.Fatalf("expected SessionSetupErrMsg, got %#v", msg)
 	}
 }
 
-func TestUpdate_SessionReadyMsg_Quits(t *testing.T) {
+func TestSessionSetupCmd_ReturnsSessionName(t *testing.T) {
+	cmd := sessionSetupCmd(func(string, string) (string, error) { return "feat", nil }, "/wt", "/repo")
+	msg := cmd()
+	if r, ok := msg.(SessionReadyMsg); !ok || r.SessionName != "feat" || r.WorktreePath != "/wt" {
+		t.Fatalf("expected SessionReadyMsg with session name, got %#v", msg)
+	}
+}
+
+func TestSessionSwitchCmd(t *testing.T) {
+	var switched string
+	target := model.NavigableItem{WorktreePath: "/wt", RepoRootPath: "/repo"}
+	msg := sessionSwitchCmd(func(name string) error { switched = name; return nil }, "feat", target)()
+	if s, ok := msg.(SessionSwitchedMsg); !ok || s.WorktreePath != "/wt" || s.RepoRootPath != "/repo" {
+		t.Fatalf("expected SessionSwitchedMsg, got %#v", msg)
+	}
+	if switched != "feat" {
+		t.Errorf("switched to %q, want feat", switched)
+	}
+
+	msg = sessionSwitchCmd(func(string) error { return fmt.Errorf("boom") }, "feat", target)()
+	if e, ok := msg.(SessionSwitchErrMsg); !ok || e.WorktreePath != "/wt" {
+		t.Fatalf("expected SessionSwitchErrMsg, got %#v", msg)
+	}
+}
+
+func setupModel(switched *[]string) Model {
 	m := testModel()
-	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup}
+	m.sessionSetup = func(string, string) (string, error) { return "s", nil }
+	m.sessionSwitch = func(name string) error {
+		*switched = append(*switched, name)
+		return nil
+	}
+	return m
+}
 
-	result, cmd := m.Update(SessionReadyMsg{WorktreePath: "/code/repo1", RepoRootPath: "/code/repo1"})
-	updated := result.(Model)
+func runCmdMsg(t *testing.T, cmd tea.Cmd) tea.Msg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected cmd")
+	}
+	return cmd()
+}
 
-	if updated.selected != "/code/repo1" {
-		t.Errorf("selected = %q", updated.selected)
+func TestUpdate_ParallelSetups_SwitchesToLastSelectedAfterAllReady(t *testing.T) {
+	var switched []string
+	m := setupModel(&switched)
+	first := m.items[m.cursor]
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = result.(Model)
+	second := m.items[m.cursor]
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+
+	result, cmd := m.Update(SessionReadyMsg{WorktreePath: second.WorktreePath, RepoRootPath: second.RepoRootPath, SessionName: "second"})
+	m = result.(Model)
+	if cmd != nil {
+		t.Error("should not switch while another setup is pending")
+	}
+	if m.quitWhenIdle {
+		t.Error("should stay interactive while another setup is pending")
+	}
+
+	result, cmd = m.Update(SessionReadyMsg{WorktreePath: first.WorktreePath, RepoRootPath: first.RepoRootPath, SessionName: "first"})
+	m = result.(Model)
+	msg := runCmdMsg(t, cmd)
+	if len(switched) != 1 || switched[0] != "second" {
+		t.Fatalf("expected a single switch to the last selected session, got %v", switched)
+	}
+
+	result, cmd = m.Update(msg)
+	m = result.(Model)
+	if m.selected != second.WorktreePath || m.selectedRepoPath != second.RepoRootPath {
+		t.Errorf("selected = %q (%q), want %q", m.selected, m.selectedRepoPath, second.WorktreePath)
 	}
 	if cmd == nil {
-		t.Error("expected tea.Quit")
+		t.Error("expected tea.Quit after switching")
+	}
+}
+
+func TestUpdate_SetupReady_KeepsOpsAvailable(t *testing.T) {
+	var switched []string
+	m := setupModel(&switched)
+	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup, "/other": opSetup}
+	m.setupTarget = model.NavigableItem{WorktreePath: "/other"}
+
+	result, _ := m.Update(SessionReadyMsg{WorktreePath: "/code/repo1", SessionName: "repo1"})
+	m = result.(Model)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = result.(Model)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if !result.(Model).confirmingArchive {
+		t.Error("d should work after one of several setups completes")
+	}
+}
+
+func TestUpdate_SetupReady_ForEarlierSelection_DoesNotSwitchToIt(t *testing.T) {
+	var switched []string
+	m := setupModel(&switched)
+	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup}
+	m.setupTarget = model.NavigableItem{WorktreePath: "/code/repo1-feat"}
+	m.readySessions = map[string]string{"/code/repo1-feat": "feat"}
+
+	_, cmd := m.Update(SessionReadyMsg{WorktreePath: "/code/repo1", SessionName: "repo1"})
+	runCmdMsg(t, cmd)
+	if len(switched) != 1 || switched[0] != "feat" {
+		t.Errorf("expected switch to last selected session, got %v", switched)
 	}
 }
 
 func TestUpdate_SessionReadyMsg_WaitsForArchives(t *testing.T) {
-	m := testModel()
+	var switched []string
+	m := setupModel(&switched)
 	m.runner = &fakeRunner{}
 	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup, "/code/repo1-feat": opArchive}
+	m.setupTarget = model.NavigableItem{WorktreePath: "/code/repo1", RepoRootPath: "/code/repo1"}
 
-	result, cmd := m.Update(SessionReadyMsg{WorktreePath: "/code/repo1", RepoRootPath: "/code/repo1"})
-	updated := result.(Model)
+	result, cmd := m.Update(SessionReadyMsg{WorktreePath: "/code/repo1", RepoRootPath: "/code/repo1", SessionName: "repo1"})
+	m = result.(Model)
+	result, cmd = m.Update(runCmdMsg(t, cmd))
+	m = result.(Model)
 	if cmd != nil {
 		t.Error("should not quit while archive is pending")
 	}
-	if !updated.quitWhenIdle {
+	if !m.quitWhenIdle {
 		t.Error("should wait for pending ops")
 	}
 
-	result, cmd = updated.Update(WorktreeArchivedMsg{WorktreePath: "/code/repo1-feat"})
+	result, cmd = m.Update(WorktreeArchivedMsg{WorktreePath: "/code/repo1-feat"})
 	if cmd == nil {
 		t.Error("expected quit after last pending op")
 	}
@@ -1470,9 +1590,53 @@ func TestUpdate_SessionReadyMsg_WaitsForArchives(t *testing.T) {
 	}
 }
 
+func TestUpdate_Switching_BlocksQuitUntilSwitched(t *testing.T) {
+	var switched []string
+	m := setupModel(&switched)
+	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup}
+	m.setupTarget = model.NavigableItem{WorktreePath: "/code/repo1", RepoRootPath: "/code/repo1"}
+
+	result, _ := m.Update(SessionReadyMsg{WorktreePath: "/code/repo1", SessionName: "repo1"})
+	m = result.(Model)
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd != nil || result.(Model).quitting {
+		t.Error("q should wait for the switch to finish")
+	}
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(result.(Model).pendingOps) != 1 {
+		t.Error("enter should be ignored while switching")
+	}
+}
+
+func TestUpdate_LastSelectedSetupFails_StaysOpen(t *testing.T) {
+	var switched []string
+	m := setupModel(&switched)
+	m.pendingOps = map[string]pendingOp{"/code/repo1-feat": opSetup}
+	m.setupTarget = model.NavigableItem{WorktreePath: "/code/repo1-feat"}
+	m.readySessions = map[string]string{"/code/repo1": "repo1"}
+
+	result, cmd := m.Update(SessionSetupErrMsg{WorktreePath: "/code/repo1-feat", Err: fmt.Errorf("tmux down")})
+	updated := result.(Model)
+
+	if cmd != nil {
+		t.Error("should neither switch nor quit when the last selected setup fails")
+	}
+	if updated.err == nil {
+		t.Error("err should be set")
+	}
+	if updated.quitWhenIdle {
+		t.Error("should stay interactive")
+	}
+	if len(switched) != 0 {
+		t.Errorf("should not switch, got %v", switched)
+	}
+}
+
 func TestUpdate_SessionSetupErrMsg(t *testing.T) {
 	m := testModel()
 	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup}
+	m.setupTarget = model.NavigableItem{WorktreePath: "/code/repo1"}
 
 	result, cmd := m.Update(SessionSetupErrMsg{WorktreePath: "/code/repo1", Err: fmt.Errorf("tmux down")})
 	updated := result.(Model)
@@ -1485,6 +1649,21 @@ func TestUpdate_SessionSetupErrMsg(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Error("should not quit on setup error")
+	}
+}
+
+func TestUpdate_SessionSwitchErrMsg_StaysOpen(t *testing.T) {
+	m := testModel()
+	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup}
+	m.quitWhenIdle = true
+
+	result, cmd := m.Update(SessionSwitchErrMsg{WorktreePath: "/code/repo1", Err: fmt.Errorf("boom")})
+	updated := result.(Model)
+	if updated.err == nil || cmd != nil {
+		t.Error("switch error should be shown without quitting")
+	}
+	if updated.quitWhenIdle || len(updated.pendingOps) != 0 {
+		t.Error("should return to interactive state")
 	}
 }
 

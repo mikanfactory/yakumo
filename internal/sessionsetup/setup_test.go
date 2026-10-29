@@ -47,7 +47,7 @@ func (f *fakeTmux) called(prefix string) bool {
 func TestSetup_ExistingSession_OnlySwitches(t *testing.T) {
 	tm := &fakeTmux{existingSessions: map[string]bool{"feat": true}}
 
-	err := Setup(Options{
+	name, err := Setup(Options{
 		TmuxRunner:    tm,
 		WorktreePath:  "/wt/feat",
 		DiffUICommand: "yakumo diff-ui",
@@ -56,8 +56,8 @@ func TestSetup_ExistingSession_OnlySwitches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !tm.called("switch-client -t =feat") {
-		t.Error("expected switch-client to existing session")
+	if name != "feat" {
+		t.Errorf("session name = %q, want feat", name)
 	}
 	if tm.called("send-keys") {
 		t.Error("send-keys should not be called for existing session")
@@ -71,7 +71,7 @@ func TestSetup_NewSession_LaunchesCommandsAndFocuses(t *testing.T) {
 	tm := &fakeTmux{}
 	var trusted string
 
-	err := Setup(Options{
+	name, err := Setup(Options{
 		TmuxRunner:     tm,
 		GitRunner:      git.FakeCommandRunner{},
 		WorktreePath:   "/wt/feat",
@@ -94,6 +94,12 @@ func TestSetup_NewSession_LaunchesCommandsAndFocuses(t *testing.T) {
 	if !tm.called("select-pane -t %0") {
 		t.Error("expected center pane focused")
 	}
+	if name != "feat" {
+		t.Errorf("session name = %q, want feat", name)
+	}
+	if tm.called("switch-client") {
+		t.Error("setup should not switch client")
+	}
 	if trusted != "/wt/feat" {
 		t.Errorf("trusted = %q, want /wt/feat", trusted)
 	}
@@ -102,7 +108,7 @@ func TestSetup_NewSession_LaunchesCommandsAndFocuses(t *testing.T) {
 func TestSetup_NewSession_SkipsEmptyCommands(t *testing.T) {
 	tm := &fakeTmux{}
 
-	err := Setup(Options{TmuxRunner: tm, WorktreePath: "/wt/feat"})
+	_, err := Setup(Options{TmuxRunner: tm, WorktreePath: "/wt/feat"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -117,7 +123,7 @@ func TestSetup_NewSession_SkipsEmptyCommands(t *testing.T) {
 func TestSetup_NewSession_LaunchFailuresAreNonFatal(t *testing.T) {
 	tm := &fakeTmux{failPrefix: "send-keys"}
 
-	err := Setup(Options{
+	_, err := Setup(Options{
 		TmuxRunner:     tm,
 		WorktreePath:   "/wt/feat",
 		DiffUICommand:  "yakumo diff-ui",
@@ -132,7 +138,7 @@ func TestSetup_NewSession_LaunchFailuresAreNonFatal(t *testing.T) {
 func TestSetup_SessionCreationError(t *testing.T) {
 	tm := &fakeTmux{failPrefix: "new-session"}
 
-	err := Setup(Options{TmuxRunner: tm, WorktreePath: "/wt/feat"})
+	_, err := Setup(Options{TmuxRunner: tm, WorktreePath: "/wt/feat"})
 	if err == nil {
 		t.Fatal("expected error when session creation fails")
 	}

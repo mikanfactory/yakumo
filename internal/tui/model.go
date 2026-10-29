@@ -92,6 +92,7 @@ type WorktreeArchiveErrMsg struct {
 type SessionReadyMsg struct {
 	WorktreePath string
 	RepoRootPath string
+	SessionName  string
 }
 
 // SessionSetupErrMsg is sent when tmux session setup fails.
@@ -100,8 +101,25 @@ type SessionSetupErrMsg struct {
 	Err          error
 }
 
-// SessionSetupFunc prepares and switches to the tmux session for a worktree.
-type SessionSetupFunc func(worktreePath, repoRootPath string) error
+// SessionSwitchedMsg is sent when the client has switched to the session of the
+// last selected worktree.
+type SessionSwitchedMsg struct {
+	WorktreePath string
+	RepoRootPath string
+}
+
+// SessionSwitchErrMsg is sent when switching to the prepared session fails.
+type SessionSwitchErrMsg struct {
+	WorktreePath string
+	Err          error
+}
+
+// SessionSetupFunc prepares the tmux session for a worktree without switching
+// to it and returns the session name.
+type SessionSetupFunc func(worktreePath, repoRootPath string) (string, error)
+
+// SessionSwitchFunc switches the tmux client to the named session.
+type SessionSwitchFunc func(sessionName string) error
 
 type pendingOp int
 
@@ -141,6 +159,9 @@ type Model struct {
 	archiveTarget          model.NavigableItem
 	agentTickRunning       bool
 	sessionSetup           SessionSetupFunc
+	sessionSwitch          SessionSwitchFunc
+	setupTarget            model.NavigableItem
+	readySessions          map[string]string
 	pendingOps             map[string]pendingOp
 	quitWhenIdle           bool
 	refreshSeq             int
@@ -169,10 +190,12 @@ func NewModel(cfg model.Config, runner git.CommandRunner, configPath string, tmu
 	}
 }
 
-// WithSessionSetup makes worktree selection run setup in the background
-// and quit only after it completes.
-func (m Model) WithSessionSetup(setup SessionSetupFunc) Model {
+// WithSessionSetup makes worktree selection run setup in the background.
+// Several setups may run in parallel; once all of them finish, the client is
+// switched to the last selected worktree and the program quits.
+func (m Model) WithSessionSetup(setup SessionSetupFunc, switchFn SessionSwitchFunc) Model {
 	m.sessionSetup = setup
+	m.sessionSwitch = switchFn
 	return m
 }
 

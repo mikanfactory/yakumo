@@ -641,33 +641,31 @@ func TestCreateSessionLayout_EmptyStartupCommand(t *testing.T) {
 	}
 }
 
-// --- SelectWorktreeSession tests ---
+// --- EnsureWorktreeSession tests ---
 
-func TestSelectWorktreeSession_ExistingSession(t *testing.T) {
+func TestEnsureWorktreeSession_ExistingSession(t *testing.T) {
 	runner := &FakeRunner{
 		Outputs: map[string]string{
 			"[has-session -t =my-worktree]":                    "",
-			"[switch-client -t =my-worktree]":                  "",
-			"[select-window -t =my-worktree:main-window]":      "",
 		},
 	}
 
-	layout, err := SelectWorktreeSession(runner, "/repos/my-worktree", "", nil)
+	layout, err := EnsureWorktreeSession(runner, "/repos/my-worktree", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if layout.SessionName != "my-worktree" {
 		t.Errorf("SessionName = %q, want %q", layout.SessionName, "my-worktree")
 	}
-	// Should NOT call new-session
 	for _, call := range runner.Calls {
 		if call[0] == "new-session" {
 			t.Error("should not create new session when existing one found")
 		}
 	}
+	assertNoSwitchClient(t, runner)
 }
 
-func TestSelectWorktreeSession_NewSession(t *testing.T) {
+func TestEnsureWorktreeSession_NewSession(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
 			"[has-session -t =feat]": fmt.Errorf("not found"),
@@ -681,12 +679,10 @@ func TestSelectWorktreeSession_NewSession(t *testing.T) {
 			"[new-window -t =feat -n background-window -c /repos/feat]":             "",
 			"[split-window -v -t =feat:background-window -c /repos/feat]":           "",
 			"[list-panes -t =feat:background-window -F #{pane_id}]":                 "%3\n%4\n%5\n%6\n",
-			"[switch-client -t =feat]":                                               "",
-			"[select-window -t =feat:main-window]":                                  "",
 		},
 	}
 
-	layout, err := SelectWorktreeSession(runner, "/repos/feat", "", nil)
+	layout, err := EnsureWorktreeSession(runner, "/repos/feat", "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -696,9 +692,19 @@ func TestSelectWorktreeSession_NewSession(t *testing.T) {
 	if layout.Center1.PaneID != "%0" {
 		t.Errorf("Center1.PaneID = %q, want %%0", layout.Center1.PaneID)
 	}
+	assertNoSwitchClient(t, runner)
 }
 
-func TestSelectWorktreeSession_CreateError(t *testing.T) {
+func assertNoSwitchClient(t *testing.T, runner *FakeRunner) {
+	t.Helper()
+	for _, call := range runner.Calls {
+		if call[0] == "switch-client" || call[0] == "select-window" {
+			t.Errorf("should not switch client, got %v", call)
+		}
+	}
+}
+
+func TestEnsureWorktreeSession_CreateError(t *testing.T) {
 	runner := &FakeRunner{
 		Errors: map[string]error{
 			"[has-session -t =bad]":              fmt.Errorf("not found"),
@@ -706,31 +712,7 @@ func TestSelectWorktreeSession_CreateError(t *testing.T) {
 		},
 	}
 
-	_, err := SelectWorktreeSession(runner, "/bad", "", nil)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestSelectWorktreeSession_SwitchAfterCreateError(t *testing.T) {
-	runner := &FakeRunner{
-		Errors: map[string]error{
-			"[has-session -t =feat]":  fmt.Errorf("not found"),
-			"[switch-client -t =feat]": fmt.Errorf("switch failed"),
-		},
-		Outputs: map[string]string{
-			"[new-session -d -s feat -c /repos/feat]":                      "",
-			"[rename-window -t =feat:0 main-window]":                        "",
-			"[split-window -h -t =feat:main-window -c /repos/feat -p 25]":         "",
-			"[split-window -v -t =feat:main-window.1 -c /repos/feat -p 70]":       "",
-			"[list-panes -t =feat:main-window -F #{pane_id}]":               "%0\n%1\n%2\n",
-			"[new-window -t =feat -n background-window -c /repos/feat]":     "",
-			"[split-window -v -t =feat:background-window -c /repos/feat]":   "",
-			"[list-panes -t =feat:background-window -F #{pane_id}]":         "%3\n%4\n%5\n%6\n",
-		},
-	}
-
-	_, err := SelectWorktreeSession(runner, "/repos/feat", "", nil)
+	_, err := EnsureWorktreeSession(runner, "/bad", "", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
