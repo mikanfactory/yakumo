@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
+	"github.com/mikanfactory/yakumo/internal/archive"
 	"github.com/mikanfactory/yakumo/internal/claude"
 	"github.com/mikanfactory/yakumo/internal/config"
 	"github.com/mikanfactory/yakumo/internal/diffui"
@@ -47,6 +48,8 @@ func main() {
 		runSwapCenter()
 	case "swap-right-below":
 		runSwapRightBelow()
+	case archive.Subcommand:
+		runArchiveWorktree(os.Args[2:])
 	case "--diff":
 		fmt.Fprintln(os.Stderr, "Warning: --diff is deprecated, use 'yakumo diff-ui' instead")
 		runDiffUI()
@@ -140,6 +143,11 @@ func runWorktreeUI(configPath string) {
 			return tmux.SwitchToSession(tmuxRunner, sessionName)
 		})
 	}
+	if exe, err := os.Executable(); err == nil {
+		m = m.WithDetachedArchive(archive.Detached(exe))
+	} else {
+		log.Printf("[main] archives will block quitting: %v", err)
+	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	result, err := p.Run()
@@ -181,6 +189,36 @@ func trustClaudeDirectory(worktreePath string) error {
 		return err
 	}
 	return claude.EnsureDirectoryTrusted(filepath.Join(home, ".claude.json"), worktreePath)
+}
+
+func runArchiveWorktree(args []string) {
+	setupDebugLog()
+
+	fs := flag.NewFlagSet(archive.Subcommand, flag.ExitOnError)
+	repoRootPath := fs.String("repo", "", "repository root path")
+	worktreePath := fs.String("path", "", "worktree path")
+	fs.Parse(args)
+	if *repoRootPath == "" || *worktreePath == "" {
+		fmt.Fprintln(os.Stderr, "error: --repo and --path are required")
+		os.Exit(1)
+	}
+
+	var tmuxRunner tmux.Runner
+	if tmux.IsInsideTmux() {
+		tmuxRunner = tmux.OSRunner{}
+	}
+
+	err := archive.Run(archive.Options{
+		TmuxRunner:   tmuxRunner,
+		GitRunner:    git.OSCommandRunner{},
+		RepoRootPath: *repoRootPath,
+		WorktreePath: *worktreePath,
+	})
+	if err != nil {
+		log.Printf("[archive] %s: %v", *worktreePath, err)
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
 }
 
 func runSwapCenter() {

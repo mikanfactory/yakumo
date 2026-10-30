@@ -46,7 +46,7 @@ func (m Model) updateBackground(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case WorktreeArchivedMsg:
 		m = m.clearPending(msg.WorktreePath)
 		m = m.applyGroups(removeWorktree(m.groups, msg.WorktreePath))
-		if m.quitWhenIdle && len(m.pendingOps) == 0 {
+		if m.quitWhenIdle && m.blockingOps() == 0 {
 			next, cmd := m.quitIfIdle()
 			return next, cmd, true
 		}
@@ -159,7 +159,7 @@ func sessionSwitchCmd(switchFn SessionSwitchFunc, sessionName string, target mod
 // exiting the program would kill those goroutines mid-operation. A forced
 // request while already waiting quits immediately.
 func (m Model) requestQuit(force bool) (tea.Model, tea.Cmd) {
-	if len(m.pendingOps) == 0 || (force && m.quitWhenIdle) {
+	if m.blockingOps() == 0 || (force && m.quitWhenIdle) {
 		m.quitting = true
 		return m, tea.Quit
 	}
@@ -168,7 +168,7 @@ func (m Model) requestQuit(force bool) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) quitIfIdle() (Model, tea.Cmd) {
-	if !m.quitWhenIdle || len(m.pendingOps) > 0 {
+	if !m.quitWhenIdle || m.blockingOps() > 0 {
 		return m, nil
 	}
 	if m.selected == "" {
@@ -191,6 +191,18 @@ func (m Model) refresh() (Model, tea.Cmd) {
 		}
 		return msg
 	}
+}
+
+// blockingOps counts the operations that quitting must wait for. Detached
+// archives outlive this program, so they never block.
+func (m Model) blockingOps() int {
+	n := 0
+	for _, op := range m.pendingOps {
+		if op != opArchive || !m.archivesDetached {
+			n++
+		}
+	}
+	return n
 }
 
 func (m Model) isPending(worktreePath string) bool {
@@ -245,7 +257,7 @@ func (m Model) pendingLabel(item model.NavigableItem) string {
 }
 
 func (m Model) pendingSummary() string {
-	n := len(m.pendingOps)
+	n := m.blockingOps()
 	suffix := "s"
 	if n == 1 {
 		suffix = ""
