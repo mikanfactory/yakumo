@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/mikanfactory/yakumo/internal/agent"
+	"github.com/mikanfactory/yakumo/internal/archive"
 	"github.com/mikanfactory/yakumo/internal/branchname"
 	"github.com/mikanfactory/yakumo/internal/config"
 	"github.com/mikanfactory/yakumo/internal/git"
@@ -121,6 +121,9 @@ type SessionSetupFunc func(worktreePath, repoRootPath string) (string, error)
 // SessionSwitchFunc switches the tmux client to the named session.
 type SessionSwitchFunc func(sessionName string) error
 
+// WorktreeArchiveFunc removes a worktree and its tmux session.
+type WorktreeArchiveFunc func(repoRootPath, worktreePath string) error
+
 type pendingOp int
 
 const (
@@ -160,6 +163,8 @@ type Model struct {
 	agentTickRunning       bool
 	sessionSetup           SessionSetupFunc
 	sessionSwitch          SessionSwitchFunc
+	archive                WorktreeArchiveFunc
+	archivesDetached       bool
 	setupTarget            model.NavigableItem
 	readySessions          map[string]string
 	pendingOps             map[string]pendingOp
@@ -196,6 +201,14 @@ func NewModel(cfg model.Config, runner git.CommandRunner, configPath string, tmu
 func (m Model) WithSessionSetup(setup SessionSetupFunc, switchFn SessionSwitchFunc) Model {
 	m.sessionSetup = setup
 	m.sessionSwitch = switchFn
+	return m
+}
+
+// WithDetachedArchive runs archives through archiveFn, which must keep working
+// after this program exits, so that quitting never waits for them.
+func (m Model) WithDetachedArchive(archiveFn WorktreeArchiveFunc) Model {
+	m.archive = archiveFn
+	m.archivesDetached = true
 	return m
 }
 
@@ -541,7 +554,7 @@ func (m Model) updateConfirmArchiveMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.confirmingArchive = false
 			m.err = nil
 			m = m.markPending(item.WorktreePath, opArchive)
-			return m, archiveWorktreeCmd(m.runner, m.tmuxRunner, item.RepoRootPath, item.WorktreePath)
+			return m, archiveWorktreeCmd(m.archiveFunc(), item.RepoRootPath, item.WorktreePath)
 		case tea.KeyCtrlC:
 			return m.requestQuit(true)
 		}
@@ -550,43 +563,31 @@ func (m Model) updateConfirmArchiveMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func archiveWorktreeCmd(runner git.CommandRunner, tmuxRunner tmux.Runner, repoRootPath, worktreePath string) tea.Cmd {
+func archiveWorktreeCmd(archiveFn WorktreeArchiveFunc, repoRootPath, worktreePath string) tea.Cmd {
 	return func() tea.Msg {
-		// Kill tmux session first (processes inside worktree would block git worktree remove)
-		if tmuxRunner != nil {
-			var getBranch tmux.BranchGetter
-			if runner != nil {
-				getBranch = func(wtPath string) (string, error) {
-					out, err := runner.Run(wtPath, "symbolic-ref", "--short", "HEAD")
-					if err != nil {
-						return "", err
-					}
-					return strings.TrimSpace(out), nil
-				}
-			}
-			sessionName := tmux.ResolveSessionName(tmuxRunner, worktreePath, getBranch)
-
-			// If we're inside the session being deleted, switch to main session first
-			if tmux.IsCurrentSession(tmuxRunner, sessionName) {
-				if err := tmux.SwitchToMainSession(tmuxRunner); err != nil {
-					log.Printf("[archive] switch to main session failed (non-fatal): %v", err)
-				}
-			}
-
-			tmux.KillSession(tmuxRunner, sessionName) // ignore error (session may not exist)
-		}
-
-		if err := git.RemoveWorktree(runner, repoRootPath, worktreePath); err != nil {
+		if err := archiveFn(repoRootPath, worktreePath); err != nil {
 			return WorktreeArchiveErrMsg{WorktreePath: worktreePath, Err: err}
 		}
-
-		// Clean up directory if it still remains
-		if _, err := os.Stat(worktreePath); err == nil {
-			os.RemoveAll(worktreePath)
-		}
-
 		return WorktreeArchivedMsg{WorktreePath: worktreePath}
 	}
+}
+
+func inProcessArchive(runner git.CommandRunner, tmuxRunner tmux.Runner) WorktreeArchiveFunc {
+	return func(repoRootPath, worktreePath string) error {
+		return archive.Run(archive.Options{
+			TmuxRunner:   tmuxRunner,
+			GitRunner:    runner,
+			RepoRootPath: repoRootPath,
+			WorktreePath: worktreePath,
+		})
+	}
+}
+
+func (m Model) archiveFunc() WorktreeArchiveFunc {
+	if m.archive != nil {
+		return m.archive
+	}
+	return inProcessArchive(m.runner, m.tmuxRunner)
 }
 
 func repoNameFromConfig(cfg model.Config, repoPath string) string {

@@ -1707,6 +1707,69 @@ func TestUpdate_KeyClearsError(t *testing.T) {
 	}
 }
 
+func TestArchiveWorktreeCmd_UsesInjectedArchive(t *testing.T) {
+	var got []string
+	m := testModel().WithDetachedArchive(func(repo, wt string) error {
+		got = []string{repo, wt}
+		return nil
+	})
+
+	msg := archiveWorktreeCmd(m.archiveFunc(), "/repo", "/wt")()
+	if a, ok := msg.(WorktreeArchivedMsg); !ok || a.WorktreePath != "/wt" {
+		t.Fatalf("expected WorktreeArchivedMsg, got %#v", msg)
+	}
+	if len(got) != 2 || got[0] != "/repo" || got[1] != "/wt" {
+		t.Errorf("archive called with %v", got)
+	}
+
+	m = m.WithDetachedArchive(func(string, string) error { return fmt.Errorf("boom") })
+	if _, ok := archiveWorktreeCmd(m.archiveFunc(), "/repo", "/wt")().(WorktreeArchiveErrMsg); !ok {
+		t.Error("expected WorktreeArchiveErrMsg")
+	}
+}
+
+func TestUpdate_DetachedArchive_SwitchQuitsWithoutWaiting(t *testing.T) {
+	var switched []string
+	m := setupModel(&switched).WithDetachedArchive(func(string, string) error { return nil })
+	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup, "/code/repo1-feat": opArchive}
+	m.setupTarget = model.NavigableItem{WorktreePath: "/code/repo1", RepoRootPath: "/code/repo1"}
+
+	result, cmd := m.Update(SessionReadyMsg{WorktreePath: "/code/repo1", RepoRootPath: "/code/repo1", SessionName: "repo1"})
+	m = result.(Model)
+	result, cmd = m.Update(runCmdMsg(t, cmd))
+	m = result.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected tea.Quit right after switching even though an archive is running")
+	}
+	if m.selected != "/code/repo1" {
+		t.Errorf("selected = %q", m.selected)
+	}
+}
+
+func TestUpdate_DetachedArchive_QuitDoesNotWait(t *testing.T) {
+	m := testModel().WithDetachedArchive(func(string, string) error { return nil })
+	m.pendingOps = map[string]pendingOp{"/code/repo1-feat": opArchive}
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd == nil || !result.(Model).quitting {
+		t.Error("q should quit immediately when archives are detached")
+	}
+}
+
+func TestUpdate_DetachedArchive_StillWaitsForSetups(t *testing.T) {
+	m := testModel().WithDetachedArchive(func(string, string) error { return nil })
+	m.pendingOps = map[string]pendingOp{"/code/repo1": opSetup, "/code/repo1-feat": opArchive}
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd != nil || result.(Model).quitting {
+		t.Error("q should wait for a running setup")
+	}
+	if got := renderFooter(result.(Model)); !strings.Contains(got, "1 operation") {
+		t.Errorf("footer should count only the setup, got %q", got)
+	}
+}
+
 func TestArchiveWorktreeCmd_Success(t *testing.T) {
 	runner := git.FakeCommandRunner{
 		Outputs: map[string]string{
@@ -1719,7 +1782,7 @@ func TestArchiveWorktreeCmd_Success(t *testing.T) {
 		},
 	}
 
-	cmd := archiveWorktreeCmd(runner, tmuxRunner, "/repo", "/tmp/old-worktree")
+	cmd := archiveWorktreeCmd(inProcessArchive(runner, tmuxRunner), "/repo", "/tmp/old-worktree")
 	msg := cmd()
 
 	if _, ok := msg.(WorktreeArchivedMsg); !ok {
@@ -1749,7 +1812,7 @@ func TestArchiveWorktreeCmd_Error(t *testing.T) {
 		},
 	}
 
-	cmd := archiveWorktreeCmd(runner, tmuxRunner, "/repo", "/tmp/old-worktree")
+	cmd := archiveWorktreeCmd(inProcessArchive(runner, tmuxRunner), "/repo", "/tmp/old-worktree")
 	msg := cmd()
 
 	errMsg, ok := msg.(WorktreeArchiveErrMsg)
@@ -1758,99 +1821,6 @@ func TestArchiveWorktreeCmd_Error(t *testing.T) {
 	}
 	if errMsg.Err == nil {
 		t.Error("expected error to be set")
-	}
-}
-
-func TestArchiveWorktreeCmd_NilTmuxRunner(t *testing.T) {
-	runner := git.FakeCommandRunner{
-		Outputs: map[string]string{
-			"/repo:[worktree remove /tmp/old-worktree]": "",
-		},
-	}
-
-	cmd := archiveWorktreeCmd(runner, nil, "/repo", "/tmp/old-worktree")
-	msg := cmd()
-
-	if _, ok := msg.(WorktreeArchivedMsg); !ok {
-		t.Fatalf("expected WorktreeArchivedMsg, got %T", msg)
-	}
-}
-
-func TestArchiveWorktreeCmd_RemovesDirectory(t *testing.T) {
-	// Create a temp directory to simulate a leftover worktree directory
-	tmpDir := t.TempDir()
-	worktreePath := filepath.Join(tmpDir, "leftover-wt")
-	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-
-	runner := git.FakeCommandRunner{
-		Outputs: map[string]string{
-			fmt.Sprintf("%s:[worktree remove %s]", tmpDir, worktreePath): "",
-		},
-	}
-
-	cmd := archiveWorktreeCmd(runner, nil, tmpDir, worktreePath)
-	msg := cmd()
-
-	if _, ok := msg.(WorktreeArchivedMsg); !ok {
-		t.Fatalf("expected WorktreeArchivedMsg, got %T", msg)
-	}
-
-	// Verify directory was removed
-	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
-		t.Errorf("expected worktree directory to be removed, but it still exists")
-	}
-}
-
-func TestArchiveWorktreeCmd_SwitchesToMainWhenInCurrentSession(t *testing.T) {
-	t.Setenv("TMUX_PANE", "")
-	runner := git.FakeCommandRunner{
-		Outputs: map[string]string{
-			"/repo:[worktree remove /tmp/south-korea]": "",
-		},
-	}
-	tmuxRunner := &tmux.FakeRunner{
-		Outputs: map[string]string{
-			// ResolveSessionName: has-session finds the session
-			"[has-session -t =south-korea]": "",
-			// IsCurrentSession: current session matches
-			"[display-message -p #{session_name}]": "south-korea\n",
-			// SwitchToMainSession: main session exists
-			"[has-session -t =yakumo-main]": "",
-			// SwitchToMainSession: switch-client
-			"[switch-client -t yakumo-main]": "",
-			// KillSession
-			"[kill-session -t south-korea]": "",
-		},
-	}
-
-	cmd := archiveWorktreeCmd(runner, tmuxRunner, "/repo", "/tmp/south-korea")
-	msg := cmd()
-
-	if _, ok := msg.(WorktreeArchivedMsg); !ok {
-		t.Fatalf("expected WorktreeArchivedMsg, got %T", msg)
-	}
-
-	// Verify switch-client was called before kill-session
-	switchIdx := -1
-	killIdx := -1
-	for i, call := range tmuxRunner.Calls {
-		if len(call) >= 3 && call[0] == "switch-client" && call[2] == "yakumo-main" {
-			switchIdx = i
-		}
-		if len(call) >= 1 && call[0] == "kill-session" {
-			killIdx = i
-		}
-	}
-	if switchIdx == -1 {
-		t.Error("expected switch-client to yakumo-main")
-	}
-	if killIdx == -1 {
-		t.Error("expected kill-session to be called")
-	}
-	if switchIdx != -1 && killIdx != -1 && switchIdx >= killIdx {
-		t.Errorf("switch-client (idx=%d) should be called before kill-session (idx=%d)", switchIdx, killIdx)
 	}
 }
 

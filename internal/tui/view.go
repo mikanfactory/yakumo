@@ -86,7 +86,7 @@ func (m Model) View() string {
 // renderFooter replaces the help line with status text of the same height so
 // that the viewport size used for scrolling stays unchanged.
 func renderFooter(m Model) string {
-	if m.quitWhenIdle && len(m.pendingOps) > 0 {
+	if m.quitWhenIdle && m.blockingOps() > 0 {
 		return helpStyle.Render(m.pendingSummary())
 	}
 	if m.err != nil {
