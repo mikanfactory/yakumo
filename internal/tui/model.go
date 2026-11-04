@@ -124,6 +124,14 @@ type SessionSwitchFunc func(sessionName string) error
 // WorktreeArchiveFunc removes a worktree and its tmux session.
 type WorktreeArchiveFunc func(repoRootPath, worktreePath string) error
 
+// ArchiveMarksFunc lists the worktree paths being archived by any process.
+type ArchiveMarksFunc func() ([]string, error)
+
+// ArchiveMarksMsg delivers the worktree paths being archived by any process.
+type ArchiveMarksMsg struct {
+	Paths []string
+}
+
 type pendingOp int
 
 const (
@@ -165,6 +173,8 @@ type Model struct {
 	sessionSwitch          SessionSwitchFunc
 	archive                WorktreeArchiveFunc
 	archivesDetached       bool
+	archiveMarks           ArchiveMarksFunc
+	externalArchives       map[string]bool
 	setupTarget            model.NavigableItem
 	readySessions          map[string]string
 	pendingOps             map[string]pendingOp
@@ -209,6 +219,13 @@ func (m Model) WithSessionSetup(setup SessionSetupFunc, switchFn SessionSwitchFu
 func (m Model) WithDetachedArchive(archiveFn WorktreeArchiveFunc) Model {
 	m.archive = archiveFn
 	m.archivesDetached = true
+	return m
+}
+
+// WithArchiveMarks shows archives started by other processes, such as a
+// previous run whose detached archive is still in progress.
+func (m Model) WithArchiveMarks(marksFn ArchiveMarksFunc) Model {
+	m.archiveMarks = marksFn
 	return m
 }
 

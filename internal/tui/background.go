@@ -23,9 +23,9 @@ func (m Model) updateBackground(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.loading = false
 		if !m.agentTickRunning {
 			m.agentTickRunning = true
-			return m, agentTickCmd(), true
+			return m, tea.Batch(agentTickCmd(), m.fetchArchiveMarks()), true
 		}
-		return m, nil, true
+		return m, m.fetchArchiveMarks(), true
 
 	case GitDataErrMsg:
 		m.err = msg.Err
@@ -34,9 +34,13 @@ func (m Model) updateBackground(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case AgentTickMsg:
 		if len(m.groups) > 0 && m.tmuxRunner != nil {
-			return m, fetchAgentStatusCmd(m.tmuxRunner, m.runner, m.groups), true
+			return m, tea.Batch(fetchAgentStatusCmd(m.tmuxRunner, m.runner, m.groups), m.fetchArchiveMarks()), true
 		}
 		return m, agentTickCmd(), true
+
+	case ArchiveMarksMsg:
+		next, cmd := m.applyArchiveMarks(msg.Paths)
+		return next, cmd, true
 
 	case AgentStatusMsg:
 		m.agentStatus = msg.Statuses
@@ -197,12 +201,64 @@ func (m Model) refresh() (Model, tea.Cmd) {
 // archives outlive this program, so they never block.
 func (m Model) blockingOps() int {
 	n := 0
-	for _, op := range m.pendingOps {
-		if op != opArchive || !m.archivesDetached {
+	for path, op := range m.pendingOps {
+		if op != opArchive || !(m.archivesDetached || m.externalArchives[path]) {
 			n++
 		}
 	}
 	return n
+}
+
+func (m Model) fetchArchiveMarks() tea.Cmd {
+	if m.archiveMarks == nil {
+		return nil
+	}
+	return fetchArchiveMarksCmd(m.archiveMarks)
+}
+
+func fetchArchiveMarksCmd(marksFn ArchiveMarksFunc) tea.Cmd {
+	return func() tea.Msg {
+		paths, err := marksFn()
+		if err != nil {
+			log.Printf("[archive] listing marks: %v", err)
+			return nil
+		}
+		return ArchiveMarksMsg{Paths: paths}
+	}
+}
+
+// applyArchiveMarks shows archives run by other processes as pending, and
+// removes their worktrees once the marks disappear. Archives started by this
+// program are left to WorktreeArchivedMsg.
+func (m Model) applyArchiveMarks(paths []string) (Model, tea.Cmd) {
+	marked := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		marked[p] = true
+	}
+
+	external := make(map[string]bool, len(m.externalArchives)+len(paths))
+	finished := false
+	for p := range m.externalArchives {
+		if marked[p] {
+			external[p] = true
+			continue
+		}
+		m = m.clearPending(p)
+		m = m.applyGroups(removeWorktree(m.groups, p))
+		finished = true
+	}
+	for _, p := range paths {
+		if !m.isPending(p) {
+			m = m.markPending(p, opArchive)
+			external[p] = true
+		}
+	}
+	m.externalArchives = external
+
+	if finished {
+		return m.refresh()
+	}
+	return m, nil
 }
 
 func (m Model) isPending(worktreePath string) bool {
