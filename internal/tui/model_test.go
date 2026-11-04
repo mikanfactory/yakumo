@@ -2273,3 +2273,107 @@ func TestUpdate_WindowSizeMsg_LargeHeight_ResetsScrollOff(t *testing.T) {
 		t.Errorf("scrollOff should reset to 0 when viewport fits all items, got %d", updated.scrollOff)
 	}
 }
+
+func TestUpdate_ArchiveMarks_MarksExternalArchivePending(t *testing.T) {
+	m := testModel().WithArchiveMarks(func() ([]string, error) { return nil, nil })
+
+	result, _ := m.Update(ArchiveMarksMsg{Paths: []string{"/code/repo1-feat"}})
+	got := result.(Model)
+
+	item := got.items[findItemIndex(got.items, "/code/repo1-feat")]
+	if label := got.pendingLabel(item); label != "archiving…" {
+		t.Errorf("expected archiving label, got %q", label)
+	}
+}
+
+func TestUpdate_ArchiveMarks_RemovesWorktreeWhenMarkDisappears(t *testing.T) {
+	m := testModel().WithArchiveMarks(func() ([]string, error) { return nil, nil })
+	result, _ := m.Update(ArchiveMarksMsg{Paths: []string{"/code/repo1-feat"}})
+
+	result, _ = result.(Model).Update(ArchiveMarksMsg{Paths: nil})
+	got := result.(Model)
+
+	if got.isPending("/code/repo1-feat") {
+		t.Error("archive should no longer be pending")
+	}
+	if findItemIndex(got.items, "/code/repo1-feat") >= 0 {
+		t.Error("archived worktree should be removed from the list")
+	}
+}
+
+func TestUpdate_ArchiveMarks_KeepsOwnArchive(t *testing.T) {
+	m := testModel().WithArchiveMarks(func() ([]string, error) { return nil, nil })
+	m.pendingOps = map[string]pendingOp{"/code/repo1-feat": opArchive}
+
+	result, _ := m.Update(ArchiveMarksMsg{Paths: []string{"/code/repo1-feat"}})
+	result, _ = result.(Model).Update(ArchiveMarksMsg{Paths: nil})
+	got := result.(Model)
+
+	if !got.isPending("/code/repo1-feat") {
+		t.Error("an archive started by this program should wait for WorktreeArchivedMsg")
+	}
+	if findItemIndex(got.items, "/code/repo1-feat") < 0 {
+		t.Error("worktree should stay until its own archive finishes")
+	}
+}
+
+func TestUpdate_ArchiveMarks_ExternalArchiveDoesNotBlockQuit(t *testing.T) {
+	m := testModel().WithArchiveMarks(func() ([]string, error) { return nil, nil })
+	result, _ := m.Update(ArchiveMarksMsg{Paths: []string{"/code/repo1-feat"}})
+
+	result, cmd := result.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd == nil || !result.(Model).quitting {
+		t.Error("q should quit immediately while another process archives")
+	}
+}
+
+func TestUpdate_GitData_FetchesArchiveMarks(t *testing.T) {
+	called := false
+	m := testModel().WithArchiveMarks(func() ([]string, error) {
+		called = true
+		return []string{"/code/repo1-feat"}, nil
+	})
+
+	_, cmd := m.Update(GitDataMsg{Groups: m.groups})
+	collectMsgs(t, cmd)
+
+	if !called {
+		t.Error("archive marks should be fetched once git data arrives")
+	}
+}
+
+func TestFetchArchiveMarksCmd_ErrorReturnsNoMsg(t *testing.T) {
+	cmd := fetchArchiveMarksCmd(func() ([]string, error) { return nil, fmt.Errorf("no server") })
+
+	if msg := cmd(); msg != nil {
+		t.Errorf("a failed fetch must not clear marks, got %#v", msg)
+	}
+}
+
+func findItemIndex(items []model.NavigableItem, worktreePath string) int {
+	for i, item := range items {
+		if item.Kind == model.ItemKindWorktree && item.WorktreePath == worktreePath {
+			return i
+		}
+	}
+	return -1
+}
+
+// collectMsgs runs cmd and any batched commands.
+func collectMsgs(t *testing.T, cmd tea.Cmd) []tea.Msg {
+	t.Helper()
+	if cmd == nil {
+		return nil
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		return nil
+	}
+	var msgs []tea.Msg
+	for _, c := range batch {
+		if c != nil {
+			msgs = append(msgs, c())
+		}
+	}
+	return msgs
+}

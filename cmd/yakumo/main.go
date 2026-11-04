@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
@@ -142,6 +143,9 @@ func runWorktreeUI(configPath string) {
 		m = m.WithSessionSetup(newSessionSetup(cfg, tmuxRunner, runner), func(sessionName string) error {
 			return tmux.SwitchToSession(tmuxRunner, sessionName)
 		})
+		m = m.WithArchiveMarks(func() ([]string, error) {
+			return tmux.ListArchiving(tmuxRunner, processAlive)
+		})
 	}
 	if exe, err := os.Executable(); err == nil {
 		m = m.WithDetachedArchive(archive.Detached(exe))
@@ -208,17 +212,37 @@ func runArchiveWorktree(args []string) {
 		tmuxRunner = tmux.OSRunner{}
 	}
 
-	err := archive.Run(archive.Options{
-		TmuxRunner:   tmuxRunner,
-		GitRunner:    git.OSCommandRunner{},
-		RepoRootPath: *repoRootPath,
-		WorktreePath: *worktreePath,
-	})
-	if err != nil {
+	if err := archiveMarked(tmuxRunner, *repoRootPath, *worktreePath); err != nil {
 		log.Printf("[archive] %s: %v", *worktreePath, err)
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
+}
+
+// archiveMarked keeps an archive mark in tmux while archiving, so that worktree
+// UIs opened in the meantime can show the archive as in progress.
+func archiveMarked(tmuxRunner tmux.Runner, repoRootPath, worktreePath string) error {
+	if tmuxRunner != nil {
+		if err := tmux.MarkArchiving(tmuxRunner, worktreePath, os.Getpid()); err != nil {
+			log.Printf("[archive] %v", err)
+		}
+		defer func() {
+			if err := tmux.UnmarkArchiving(tmuxRunner, worktreePath); err != nil {
+				log.Printf("[archive] %v", err)
+			}
+		}()
+	}
+
+	return archive.Run(archive.Options{
+		TmuxRunner:   tmuxRunner,
+		GitRunner:    git.OSCommandRunner{},
+		RepoRootPath: repoRootPath,
+		WorktreePath: worktreePath,
+	})
+}
+
+func processAlive(pid int) bool {
+	return syscall.Kill(pid, 0) == nil
 }
 
 func runSwapCenter() {
