@@ -20,6 +20,9 @@ struct PanelView: View {
             }
             rowList
             modeArea
+            if let progress = state.progress {
+                Text(progress).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.vertical, 4)
+            }
             if let message = model.message {
                 Text(message).foregroundStyle(.red).lineLimit(2).padding(.horizontal, 12).padding(.vertical, 4)
             }

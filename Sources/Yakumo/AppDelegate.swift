@@ -31,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeModel() -> AppModel {
-        // PRFetcher keeps gh_path from construction, so the config is read before building it.
+        // Not left to AppModel.start(): PRFetcher takes gh_path only at init, so the config is read here first.
         let config = (try? configStore.load()) ?? .default
         let prFetcher = PRFetcher(ghPath: config.ghPath, runner: runner, now: { ContinuousClock.now })
         return AppModel(
@@ -75,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func openSettings() {
         let window = settingsWindow ?? makeSettingsWindow()
-        // A fresh view each time, so the repository list reflects `a` additions made since the last open.
+        // Not reusing the previous view: it would keep showing the repository list from the last open.
         window.contentViewController = NSHostingController(
             rootView: SettingsView(configStore: configStore) { [weak self] in self?.rebuildModel() })
         settingsWindow = window

@@ -19,6 +19,7 @@ enum PanelMode: Equatable {
 final class PanelState {
     var mode: PanelMode = .list
     var inputText = ""
+    var progress: String?
 
     var completions: [String] {
         guard mode == .input(.addRepository) else { return [] }
@@ -58,6 +59,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private static let nonActivating = true
     private static let size = NSSize(width: 560, height: 560)
     private static let creatingText = "worktree を作成中…"
+    private static let removingText = "worktree を削除中…"
     private static let noRepoText = "リポジトリの行で n を押してください"
     private static let noPRText = "この行には PR がありません"
 
@@ -98,7 +100,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     var isVisible: Bool { panel.isVisible }
 
     func toggle() {
-        isVisible ? hide() : show()
+        isVisible ? hide(restoringFocus: true) : show()
     }
 
     func show() {
@@ -111,12 +113,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         model.setPanelVisible(true)
     }
 
-    func hide() {
+    // Not restored by default: on resign key, Settings or `o` another window is taking focus,
+    // and bringing the previous app back would cover it.
+    func hide(restoringFocus: Bool = false) {
         guard panel.isVisible else { return }
         panel.orderOut(nil)
         state.mode = .list
         model.setPanelVisible(false)
-        if !Self.nonActivating, let previousApp, previousApp != NSRunningApplication.current {
+        if restoringFocus, !Self.nonActivating, let previousApp, previousApp != NSRunningApplication.current {
             previousApp.activate(from: .current)
         }
     }
@@ -162,7 +166,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     private func handleListKey(_ event: NSEvent) -> Bool {
         model.message = nil
         switch event.keyCode {
-        case KeyCode.escape: hide()
+        case KeyCode.escape: hide(restoringFocus: true)
         case KeyCode.returnKey, KeyCode.keypadEnter: activateRow()
         case KeyCode.down: model.moveCursor(1)
         case KeyCode.up: model.moveCursor(-1)
@@ -201,7 +205,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         switch event.keyCode {
         case KeyCode.returnKey, KeyCode.keypadEnter:
             state.mode = .list
-            Task { await model.confirmRemove(confirmation) }
+            state.progress = Self.removingText
+            Task {
+                await model.confirmRemove(confirmation)
+                state.progress = nil
+            }
         case KeyCode.escape:
             state.mode = .list
         default:
@@ -218,7 +226,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         switch currentRow {
         case .space:
             Task {
-                if await model.activate() { hide() }
+                if await model.activate() { hide(restoringFocus: true) }
             }
         case .addWorktree(let repoRoot): state.begin(.newWorktree(repoRoot: repoRoot))
         case .addRepository: state.begin(.addRepository)
@@ -244,11 +252,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         state.mode = .list
         switch kind {
         case .newWorktree(let repoRoot):
-            model.message = Self.creatingText
+            state.progress = Self.creatingText
             let model = model
             Task {
                 await model.createWorktree(repoRoot: repoRoot, input: text)
-                if model.message == Self.creatingText { model.message = nil }
+                state.progress = nil
             }
         case .addRepository:
             guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
