@@ -45,8 +45,8 @@ public struct PRCheck: Decodable, Equatable, Sendable {
     ]
     private static let successResults: Set<String> = ["SUCCESS", "SKIPPED", "NEUTRAL"]
 
-    var isFailure: Bool { Self.failureResults.contains(result) }
-    var isSuccess: Bool { Self.successResults.contains(result) }
+    public var isFailure: Bool { Self.failureResults.contains(result) }
+    public var isSuccess: Bool { Self.successResults.contains(result) }
 }
 
 public struct PRComment: Decodable, Equatable, Sendable {
