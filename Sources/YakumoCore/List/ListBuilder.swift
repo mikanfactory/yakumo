@@ -9,9 +9,9 @@ public enum ListBuilder {
 
         for repository in repositories {
             let root = standardize(repository.path)
-            rows.append(.repoHeader(name: repository.name, root: repository.path))
+            rows.append(.repoHeader(name: repository.name, root: root))
             rows += sorted(workspaces.filter { $0.worktree.map { standardize($0.repoRoot) } == root }).map(ListRow.space)
-            rows.append(.addWorktree(repoRoot: repository.path))
+            rows.append(.addWorktree(repoRoot: root))
         }
 
         // Grouping by repoName would merge same-named repos checked out in different places.
