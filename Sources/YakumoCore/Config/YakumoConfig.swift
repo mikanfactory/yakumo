@@ -18,7 +18,7 @@ public struct YakumoConfig: Codable, Equatable, Sendable {
     public static let `default` = YakumoConfig(
         repositories: [],
         defaultBaseRef: "origin/main",
-        ghPath: "/opt/homebrew/bin/gh"
+        ghPath: "~/.local/share/mise/shims/gh"
     )
 
     public init(repositories: [RepositoryDef], defaultBaseRef: String, ghPath: String) {

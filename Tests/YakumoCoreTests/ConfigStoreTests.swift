@@ -17,7 +17,7 @@ struct ConfigStoreTests {
         let config = try store.load()
         #expect(config == YakumoConfig.default)
         #expect(config.defaultBaseRef == "origin/main")
-        #expect(config.ghPath == "/opt/homebrew/bin/gh")
+        #expect(config.ghPath == "~/.local/share/mise/shims/gh")
         #expect(config.repositories.isEmpty)
     }
 
