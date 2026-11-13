@@ -45,13 +45,11 @@ public actor PRFetcher {
         await acquire()
         let result = await fetch(worktreePath: worktreePath)
         release()
-        // Failures stay uncached so the next refresh retries instead of pinning an outage.
-        switch result {
-        case .found, .none:
-            entries[worktreePath] = Entry(lookup: result, fetchedAt: now())
-        case .failed:
-            break
+        // A transient failure must not replace a PR the user already saw with an error.
+        if case .failed = result {
+            return entries[worktreePath]?.lookup ?? result
         }
+        entries[worktreePath] = Entry(lookup: result, fetchedAt: now())
         return result
     }
 
@@ -76,6 +74,9 @@ public actor PRFetcher {
         do {
             output = try await runner.run(ghPath, ["pr", "view", "--json", Self.jsonFields], worktreePath)
         } catch {
+            if error is CancellationError || Task.isCancelled {
+                return .failed("キャンセルされました")
+            }
             return .failed("gh が見つかりません: \(ghPath)")
         }
         guard output.status == 0 else {

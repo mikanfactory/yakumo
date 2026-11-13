@@ -80,6 +80,76 @@ struct PRFetcherTests {
         #expect(await calls.entries.count == 2)
     }
 
+    private actor Switch {
+        var failing = false
+        func fail() { failing = true }
+    }
+
+    private func flakyRunner(_ sw: Switch, error: (any Error)? = nil) -> CommandRunner {
+        CommandRunner { _, _, _ in
+            if await sw.failing {
+                if let error { throw error }
+                return (1, Data(), "network down")
+            }
+            return (0, prJSON, "")
+        }
+    }
+
+    @Test func staleRefreshFailureKeepsCachedFound() async {
+        let sw = Switch()
+        let clock = Clock()
+        let fetcher = makeFetcher(clock: clock, runner: flakyRunner(sw))
+        let first = await fetcher.lookup(worktreePath: "/w/a", force: false)
+        await sw.fail()
+        clock.advance(.seconds(61))
+        #expect(await fetcher.lookup(worktreePath: "/w/a", force: false) == first)
+        #expect(await fetcher.cached(worktreePath: "/w/a") == first)
+    }
+
+    @Test func forcedRefreshFailureKeepsCachedFound() async {
+        let sw = Switch()
+        let fetcher = makeFetcher(runner: flakyRunner(sw))
+        let first = await fetcher.lookup(worktreePath: "/w/a", force: false)
+        await sw.fail()
+        #expect(await fetcher.lookup(worktreePath: "/w/a", force: true) == first)
+        #expect(await fetcher.cached(worktreePath: "/w/a") == first)
+    }
+
+    @Test func refreshFailureKeepsCachedNone() async {
+        let calls = CallLog()
+        let runner = CommandRunner { exe, args, cwd in
+            await calls.record(exe, args, cwd)
+            if await calls.entries.count == 1 { return (1, Data(), noPRStderr) }
+            return (1, Data(), "network down")
+        }
+        let fetcher = makeFetcher(runner: runner)
+        #expect(await fetcher.lookup(worktreePath: "/w/a", force: false) == .none)
+        #expect(await fetcher.lookup(worktreePath: "/w/a", force: true) == PRLookup.none)
+        #expect(await fetcher.cached(worktreePath: "/w/a") == PRLookup.none)
+    }
+
+    @Test func failureWithoutCacheIsFailed() async {
+        let sw = Switch()
+        await sw.fail()
+        let fetcher = makeFetcher(runner: flakyRunner(sw))
+        #expect(await fetcher.lookup(worktreePath: "/w/a", force: false) == .failed("PR を取得できません: network down"))
+    }
+
+    @Test func cancellationWithoutCacheIsCancelledNotMissing() async {
+        let sw = Switch()
+        await sw.fail()
+        let fetcher = makeFetcher(runner: flakyRunner(sw, error: CancellationError()))
+        #expect(await fetcher.lookup(worktreePath: "/w/a", force: false) == .failed("キャンセルされました"))
+    }
+
+    @Test func cancellationWithCacheReturnsCache() async {
+        let sw = Switch()
+        let fetcher = makeFetcher(runner: flakyRunner(sw, error: CancellationError()))
+        let first = await fetcher.lookup(worktreePath: "/w/a", force: false)
+        await sw.fail()
+        #expect(await fetcher.lookup(worktreePath: "/w/a", force: true) == first)
+    }
+
     @Test func unparsableOutputIsFailed() async {
         let runner = CommandRunner { _, _, _ in (0, Data("garbage".utf8), "") }
         let fetcher = makeFetcher(runner: runner)
@@ -141,7 +211,8 @@ struct PRFetcherTests {
             for i in 0..<10 {
                 group.addTask { _ = await fetcher.lookup(worktreePath: "/w/\(i)", force: false) }
             }
-            await gate.waitUntilInFlight(4)
+            let reached = await gate.waitUntilInFlight(4)
+            #expect(reached)
             for _ in 0..<50 { await Task.yield() }
             #expect(await gate.inFlight == 4)
             await gate.releaseAll()
@@ -158,24 +229,24 @@ private actor Gate {
     private(set) var total = 0
     private var open = false
     private var held: [CheckedContinuation<Void, Never>] = []
-    private var watchers: [(Int, CheckedContinuation<Void, Never>)] = []
 
     func enter() async {
         inFlight += 1
         total += 1
         maxInFlight = max(maxInFlight, inFlight)
-        let ready = watchers.filter { inFlight >= $0.0 }
-        watchers.removeAll { inFlight >= $0.0 }
-        ready.forEach { $0.1.resume() }
         if !open {
             await withCheckedContinuation { held.append($0) }
         }
         inFlight -= 1
     }
 
-    func waitUntilInFlight(_ n: Int) async {
-        if inFlight >= n { return }
-        await withCheckedContinuation { watchers.append((n, $0)) }
+    func waitUntilInFlight(_ n: Int, timeout: Duration = .seconds(5)) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while inFlight < n {
+            if ContinuousClock.now >= deadline { return false }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return true
     }
 
     func releaseAll() {
