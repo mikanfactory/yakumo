@@ -1,15 +1,5 @@
-# Build artifacts
-/yakumo
-
-# Go build cache
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go coverage tool
-*.out
+/.build/
+/build/
+/.swiftpm/
+*.xcodeproj
+.DS_Store

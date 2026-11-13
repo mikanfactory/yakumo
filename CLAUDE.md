@@ -4,46 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Git worktreeを管理するためのターミナルUIアプリケーション。Go + Bubble Tea (Charmbracelet) で構築。
+herdr のソケット API を叩いて git worktree ごとの Space を管理する、macOS メニューバー常駐アプリ。Swift + SwiftPM。
 
 ## Commands
 
 ```bash
-# 実行（worktree UI）
-go run ./cmd/yakumo
-
-# 実行（diff UI）
-go run ./cmd/yakumo -- diff-ui
-
-# 実行（swap center pane）
-go run ./cmd/yakumo -- swap-center
-
-# 実行（swap right-below pane）
-go run ./cmd/yakumo -- swap-right-below
-
-# ビルド
-go build -o yakumo ./cmd/yakumo
-
-# テスト
-go test ./...
-
-# テスト（カバレッジ付き）
-go test -cover ./...
+make test      # swift test（Testing 用オプションとカバレッジ付き）
+make app       # build/Yakumo.app を作る
+make install   # ~/Applications にコピーする
 ```
 
-## Architecture
+## Layout
 
-Bubble TeaのElm Architecture (Model-Update-View) パターンに従う。
+- `Sources/YakumoCore` - UI に依存しないロジック（カバレッジ 80% 以上）
+- `Sources/Yakumo` - AppKit のエントリーポイントと UI
+- `Tests/YakumoCoreTests` - YakumoCore のテスト
 
-- `cmd/yakumo/main.go` - 統合エントリーポイント（サブコマンドでUI切替）
-- `internal/tui/` - worktree UI (Model-Update-View)
-- `internal/diffui/` - diff/PR review UI (Model-Update-View)
-- `Model` - アプリケーション状態（worktreeリスト、カーソル位置）
-- `Update` - キー入力ハンドリング（vim風: j/k, 矢印キー, q/ctrl+c）
-- `View` - Lipglossによるスタイル付きレンダリング
+## Toolchain Notes
 
-## Tech Stack
+- Command Line Tools だけの環境なので、`swift test` には Makefile の `TEST_FLAGS` が必要。素の `swift test` は使わない。
+- KeyboardShortcuts は 1.x（`1.10.0 ..< 1.16.0`）に固定している。1.16 以降と 2.x は `#Preview` を使い、Xcode にしかない PreviewsMacros が必要でビルドできない。
 
-- Go 1.24
-- `charmbracelet/bubbletea` - TUIフレームワーク
-- `charmbracelet/lipgloss` - ターミナルスタイリング
+## Go 版の参照
+
+Go 版（tmux + Bubble Tea）は `c88e47e` までに残っている。移植元の参照は `git show c88e47e:internal/github/pr.go` のように読む。
