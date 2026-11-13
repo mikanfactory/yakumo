@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let model = makeModel()
         panel = PanelController(model: model) { [weak self] in self?.openSettings() }
         startTask = Task { await model.start() }
+        installMainMenu()
         installStatusItem()
         KeyboardShortcuts.onKeyUp(for: .togglePanel) { [weak self] in
             MainActor.assumeIsolated { self?.panel?.toggle() }
@@ -48,6 +49,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let model = makeModel()
         panel?.replaceModel(model)
         startTask = Task { await model.start() }
+    }
+
+    // Not skipped for an accessory app: the menu bar stays hidden, but without a main menu
+    // Cmd-C/V/X/A/Z never reach the text fields.
+    private func installMainMenu() {
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        let appMenu = NSMenu(title: "Yakumo")
+        appMenu.addItem(withTitle: "Quit Yakumo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        let mainMenu = NSMenu()
+        for submenu in [appMenu, editMenu] {
+            let item = NSMenuItem(title: submenu.title, action: nil, keyEquivalent: "")
+            item.submenu = submenu
+            mainMenu.addItem(item)
+        }
+        NSApp.mainMenu = mainMenu
     }
 
     private func installStatusItem() {
