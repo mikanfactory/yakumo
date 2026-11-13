@@ -46,6 +46,21 @@ private final class RunnerLog: Sendable {
     func count(cwd: String) -> Int { all.filter { $0.cwd == cwd }.count }
 }
 
+private final class CommandLog: Sendable {
+    private let entries = OSAllocatedUnfairLock<[(executable: String, args: [String])]>(initialState: [])
+    var all: [(executable: String, args: [String])] { entries.withLock { $0 } }
+    var gitCalls: [[String]] { all.filter { $0.executable == "/usr/bin/git" }.map(\.args) }
+    func record(_ executable: String, _ args: [String]) { entries.withLock { $0.append((executable, args)) } }
+}
+
+private func createRunner(log: CommandLog, fetchStatus: Int32) -> CommandRunner {
+    CommandRunner { executable, args, _ in
+        log.record(executable, args)
+        if executable == "/usr/bin/git" { return (fetchStatus, Data(), fetchStatus == 0 ? "" : "couldn't find remote ref") }
+        return (0, Data(#"{"headRefName":"feat/pr-head"}"#.utf8), "")
+    }
+}
+
 private struct ConfigBroken: Error {}
 private struct NotGit: Error {}
 
@@ -252,14 +267,75 @@ struct AppModelTests {
         #expect(h.runnerLog.all.isEmpty)
     }
 
-    @Test func createUsesConfiguredBaseRefAndBranch() async throws {
-        let config = YakumoConfig(repositories: [], defaultBaseRef: "origin/develop", ghPath: "/gh")
-        let h = try await makeHarness(config: config)
+    @Test func createFromPRBranchStartsFromTheRemoteBranch() async throws {
+        let log = CommandLog()
+        let h = try await makeHarness(config: .default, runner: createRunner(log: log, fetchStatus: 0))
+        defer { h.task.cancel() }
+        h.herdr.setCreateResult(space("new"))
+        await h.model.createWorktree(repoRoot: "/repo", input: "https://github.com/o/r/pull/9")
+        #expect(log.gitCalls == [["-C", "/repo", "fetch", "origin", "feat/pr-head"]])
+        let creates = h.herdr.calls.compactMap { if case .create(let p) = $0 { p } else { nil } }
+        #expect(creates == [WorktreeCreateParams(
+            cwd: "/repo", branch: "feat/pr-head", base: "origin/feat/pr-head", focus: true)])
+    }
+
+    @Test func createFromRemoteBranchNameStartsFromTheRemoteBranch() async throws {
+        let log = CommandLog()
+        let h = try await makeHarness(config: .default, runner: createRunner(log: log, fetchStatus: 0))
         defer { h.task.cancel() }
         h.herdr.setCreateResult(space("new"))
         await h.model.createWorktree(repoRoot: "/repo", input: " feat/x ")
+        #expect(log.gitCalls == [["-C", "/repo", "fetch", "origin", "feat/x"]])
         let creates = h.herdr.calls.compactMap { if case .create(let p) = $0 { p } else { nil } }
-        #expect(creates == [WorktreeCreateParams(cwd: "/repo", branch: "feat/x", base: "origin/develop", focus: true)])
+        #expect(creates == [WorktreeCreateParams(cwd: "/repo", branch: "feat/x", base: "origin/feat/x", focus: true)])
+    }
+
+    @Test func createNewBranchFallsBackToTheConfiguredBaseRef() async throws {
+        let config = YakumoConfig(repositories: [], defaultBaseRef: "origin/develop", ghPath: "/gh")
+        let log = CommandLog()
+        let h = try await makeHarness(config: config, runner: createRunner(log: log, fetchStatus: 128))
+        defer { h.task.cancel() }
+        h.herdr.setCreateResult(space("new"))
+        await h.model.createWorktree(repoRoot: "/repo", input: "feat/brand-new")
+        #expect(log.gitCalls == [["-C", "/repo", "fetch", "origin", "feat/brand-new"]])
+        let creates = h.herdr.calls.compactMap { if case .create(let p) = $0 { p } else { nil } }
+        #expect(creates == [WorktreeCreateParams(
+            cwd: "/repo", branch: "feat/brand-new", base: "origin/develop", focus: true)])
+        #expect(h.model.message == nil)
+    }
+
+    @Test func createNewBranchUsesDefaultBaseWhenFetchFails() async throws {
+        let log = CommandLog()
+        let h = try await makeHarness(config: .default, runner: createRunner(log: log, fetchStatus: 1))
+        defer { h.task.cancel() }
+        h.herdr.setCreateResult(space("new"))
+        await h.model.createWorktree(repoRoot: "/repo", input: "feat/x")
+        let creates = h.herdr.calls.compactMap { if case .create(let p) = $0 { p } else { nil } }
+        #expect(creates == [WorktreeCreateParams(cwd: "/repo", branch: "feat/x", base: "origin/main", focus: true)])
+    }
+
+    @Test func createNewBranchUsesDefaultBaseWhenGitCannotRun() async throws {
+        let runner = CommandRunner { executable, _, _ in
+            if executable == "/usr/bin/git" { throw NotGit() }
+            return (0, prJSON, "")
+        }
+        let h = try await makeHarness(config: .default, runner: runner)
+        defer { h.task.cancel() }
+        h.herdr.setCreateResult(space("new"))
+        await h.model.createWorktree(repoRoot: "/repo", input: "feat/x")
+        let creates = h.herdr.calls.compactMap { if case .create(let p) = $0 { p } else { nil } }
+        #expect(creates == [WorktreeCreateParams(cwd: "/repo", branch: "feat/x", base: "origin/main", focus: true)])
+    }
+
+    @Test func createWithAutoNameDoesNotFetch() async throws {
+        let log = CommandLog()
+        let h = try await makeHarness(config: .default, runner: createRunner(log: log, fetchStatus: 0))
+        defer { h.task.cancel() }
+        h.herdr.setCreateResult(space("new"))
+        await h.model.createWorktree(repoRoot: "/repo", input: "  ")
+        #expect(log.all.isEmpty)
+        let creates = h.herdr.calls.compactMap { if case .create(let p) = $0 { p } else { nil } }
+        #expect(creates == [WorktreeCreateParams(cwd: "/repo", branch: nil, base: "origin/main", focus: true)])
     }
 
     @Test func createMovesCursorToNewSpace() async throws {

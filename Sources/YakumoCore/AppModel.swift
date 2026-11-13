@@ -22,6 +22,7 @@ public struct RemoveConfirmation: Equatable, Sendable {
 public final class AppModel {
     static let unavailableText = "herdr に接続できません"
     static let notWorktreeText = "この Space は worktree ではないので削除できません"
+    static let gitPath = "/usr/bin/git"
 
     public private(set) var rows: [ListRow] = []
     public private(set) var cursor = 0
@@ -120,7 +121,8 @@ public final class AppModel {
             message = Self.describe(error)
             return
         }
-        let params = WorktreeCreateParams(cwd: repoRoot, branch: branch, base: config.defaultBaseRef, focus: true)
+        let base = if let branch { await baseRef(forBranch: branch, repoRoot: repoRoot) } else { config.defaultBaseRef }
+        let params = WorktreeCreateParams(cwd: repoRoot, branch: branch, base: base, focus: true)
         do {
             let created = try await herdr.createWorktree(params)
             await reloadWorkspaces()
@@ -199,6 +201,11 @@ public final class AppModel {
         } catch {
             message = Self.describe(error)
         }
+    }
+
+    private func baseRef(forBranch branch: String, repoRoot: String) async -> String {
+        let fetched = try? await runner.run(Self.gitPath, ["-C", repoRoot, "fetch", "origin", branch], repoRoot)
+        return fetched?.status == 0 ? "origin/\(branch)" : config.defaultBaseRef
     }
 
     private func rebuildRows(keepSelection: Bool = true) {
