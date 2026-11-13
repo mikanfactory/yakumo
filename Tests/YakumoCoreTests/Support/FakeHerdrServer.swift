@@ -20,6 +20,24 @@ struct FakeHerdrServer: Sendable {
         let method: String
     }
 
+    private struct SubscribeRequest: Decodable {
+        struct Params: Decodable {
+            struct Item: Decodable {
+                let type: String
+                let paneID: String?
+
+                enum CodingKeys: String, CodingKey {
+                    case type
+                    case paneID = "pane_id"
+                }
+            }
+
+            let subscriptions: [Item]
+        }
+
+        let params: Params
+    }
+
     private struct State {
         var listener: DispatchSourceRead?
         var clients: [Int32: DispatchSourceRead] = [:]
@@ -61,7 +79,7 @@ struct FakeHerdrServer: Sendable {
         state.withLock { $0.rejectsConnections = rejects }
     }
 
-    func sendEvent(_ line: String) {
+    func broadcast(_ line: String) {
         let data = Data((line + "\n").utf8)
         queue.sync {
             for fd in state.withLock({ $0.subscribers }) {
@@ -156,10 +174,13 @@ struct FakeHerdrServer: Sendable {
 
     private func handle(line: Data, from fd: Int32) {
         guard let head = try? JSONDecoder().decode(RequestHead.self, from: line) else { return }
-        let reply = state.withLock { state in
+        let configured = state.withLock { state in
             state.requests.append(ReceivedRequest(id: head.id, method: head.method, line: line))
             return state.replies[head.method] ?? .result(#"{"type":"ok"}"#)
         }
+        let reply = Self.rejectsSubscription(line, method: head.method)
+            ? .error(code: "invalid_request", message: "invalid request: missing field `pane_id`")
+            : configured
         switch reply {
         case let .result(json):
             if head.method == "events.subscribe" {
@@ -173,6 +194,13 @@ struct FakeHerdrServer: Sendable {
         case .hangUp:
             disconnect(fd)
         }
+    }
+
+    private static func rejectsSubscription(_ line: Data, method: String) -> Bool {
+        guard method == "events.subscribe",
+              let request = try? JSONDecoder().decode(SubscribeRequest.self, from: line)
+        else { return false }
+        return request.params.subscriptions.contains { $0.type == "pane.agent_status_changed" && $0.paneID == nil }
     }
 
     private func disconnect(_ fd: Int32) {

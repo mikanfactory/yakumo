@@ -19,7 +19,7 @@ public actor HerdrClient: HerdrAPI {
     static let subscribedEventKinds = [
         "workspace.created", "workspace.updated", "workspace.closed", "workspace.focused",
         "workspace.renamed", "workspace.reordered", "worktree.created", "worktree.removed",
-        "pane.agent_status_changed",
+        "pane.agent_detected",
     ]
 
     private let socketPath: String
@@ -148,7 +148,8 @@ public actor HerdrClient: HerdrAPI {
                 case let .result(id, _) where id == requestID:
                     connected = true
                     continuation.yield(.connected)
-                case let .error(id, _, _) where id == requestID:
+                case let .error(_, code, message):
+                    logger.error("herdr subscription error \(code, privacy: .public): \(message, privacy: .public)")
                     return connected
                 case let .event(kind, _) where connected:
                     continuation.yield(.changed(kind: kind))
@@ -160,6 +161,8 @@ public actor HerdrClient: HerdrAPI {
         return connected
     }
 }
+
+private let logger = Logger(subsystem: "dev.mikanfactory.yakumo", category: "herdr")
 
 private struct EmptyParams: Encodable {}
 

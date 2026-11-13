@@ -148,8 +148,50 @@ private struct EventRecorder: Sendable {
         #expect(subscribe.subscriptions.map(\.type) == [
             "workspace.created", "workspace.updated", "workspace.closed", "workspace.focused",
             "workspace.renamed", "workspace.reordered", "worktree.created", "worktree.removed",
-            "pane.agent_status_changed",
+            "pane.agent_detected",
         ])
+    }
+
+    @Test func fakeRejectsAgentStatusSubscriptionWithoutPaneID() throws {
+        let server = try FakeHerdrServer.started()
+        defer { server.stop() }
+        var socket = try UnixSocket.connect(path: server.path, timeout: .seconds(5))
+        defer { socket.close() }
+
+        let params = ["subscriptions": [["type": "pane.agent_status_changed"]]]
+        try socket.write(HerdrWire.encodeRequest(id: "s1", method: "events.subscribe", params: params))
+
+        let reply = try HerdrWire.decodeLine(try #require(try socket.readLine()))
+        guard case let .error(id, code, _) = reply else {
+            Issue.record("expected error reply")
+            return
+        }
+        #expect(id == "s1")
+        #expect(code == "invalid_request")
+    }
+
+    @Test func clientSubscriptionIsAcceptedByServer() async throws {
+        let server = try FakeHerdrServer.started()
+        defer { server.stop() }
+        let recorder = EventRecorder(HerdrClient(socketPath: server.path).events())
+        defer { recorder.cancel() }
+
+        #expect(try await waitUntil { recorder.events == [.connected] })
+        #expect(server.subscriberCount == 1)
+    }
+
+    @Test func errorLineMidStreamReconnects() async throws {
+        let server = try FakeHerdrServer.started()
+        defer { server.stop() }
+        let recorder = EventRecorder(HerdrClient(socketPath: server.path, reconnectInterval: .milliseconds(50)).events())
+        defer { recorder.cancel() }
+        #expect(try await waitUntil { recorder.events == [.connected] })
+        let subscribeID = try #require(server.requests(method: "events.subscribe").first?.id)
+
+        server.broadcast(#"{"id":"\#(subscribeID)","error":{"code":"events_lost","message":"subscriber too slow"}}"#)
+
+        #expect(try await waitUntil { recorder.events == [.connected, .disconnected, .connected] })
+        #expect(server.requests(method: "events.subscribe").count == 2)
     }
 
     @Test func eventLineBecomesChanged() async throws {
@@ -159,7 +201,7 @@ private struct EventRecorder: Sendable {
         defer { recorder.cancel() }
         #expect(try await waitUntil { recorder.events == [.connected] })
 
-        server.sendEvent(#"{"event":"workspace.focused","data":{"workspace_id":"w1"}}"#)
+        server.broadcast(#"{"event":"workspace.focused","data":{"workspace_id":"w1"}}"#)
 
         #expect(try await waitUntil { recorder.events == [.connected, .changed(kind: "workspace.focused")] })
     }
