@@ -25,30 +25,38 @@ public actor HerdrClient: HerdrAPI {
     private let socketPath: String
     private let reconnectInterval: Duration
     private let requestTimeout: Duration
+    private let worktreeTimeout: Duration
     private var nextRequestID = 0
 
-    public init(socketPath: String, reconnectInterval: Duration = .seconds(2), requestTimeout: Duration = .seconds(5)) {
+    public init(
+        socketPath: String,
+        reconnectInterval: Duration = .seconds(2),
+        requestTimeout: Duration = .seconds(5),
+        worktreeTimeout: Duration = .seconds(120)
+    ) {
         self.socketPath = socketPath
         self.reconnectInterval = reconnectInterval
         self.requestTimeout = requestTimeout
+        self.worktreeTimeout = worktreeTimeout
     }
 
     public func listWorkspaces() async throws -> [WorkspaceInfo] {
-        let result = try await request("workspace.list", EmptyParams())
+        let result = try await request("workspace.list", EmptyParams(), timeout: requestTimeout)
         return try HerdrWire.makeDecoder().decode(WorkspaceList.self, from: result).workspaces
     }
 
     public func focusWorkspace(id: String) async throws {
-        _ = try await request("workspace.focus", WorkspaceParams(workspaceID: id, force: nil))
+        _ = try await request("workspace.focus", WorkspaceParams(workspaceID: id, force: nil), timeout: requestTimeout)
     }
 
     public func createWorktree(_ params: WorktreeCreateParams) async throws -> WorkspaceInfo {
-        let result = try await request("worktree.create", params)
+        let result = try await request("worktree.create", params, timeout: worktreeTimeout)
         return try HerdrWire.makeDecoder().decode(WorktreeCreated.self, from: result).workspace
     }
 
     public func removeWorktree(workspaceID: String) async throws {
-        _ = try await request("worktree.remove", WorkspaceParams(workspaceID: workspaceID, force: false))
+        _ = try await request(
+            "worktree.remove", WorkspaceParams(workspaceID: workspaceID, force: false), timeout: worktreeTimeout)
     }
 
     public nonisolated func events() -> AsyncStream<HerdrEvent> {
@@ -66,12 +74,12 @@ public actor HerdrClient: HerdrAPI {
         return stream
     }
 
-    private func request(_ method: String, _ params: some Encodable) async throws -> Data {
+    private func request(_ method: String, _ params: some Encodable, timeout: Duration) async throws -> Data {
         nextRequestID += 1
         let id = String(nextRequestID)
         let line = try HerdrWire.encodeRequest(id: id, method: method, params: params)
-        let message = try await offload { [socketPath, requestTimeout] in
-            var socket = try UnixSocket.connect(path: socketPath, timeout: requestTimeout)
+        let message = try await offload { [socketPath] in
+            var socket = try UnixSocket.connect(path: socketPath, timeout: timeout)
             defer { socket.close() }
             try socket.write(line)
             return try Self.awaitReply(id: id, on: &socket)

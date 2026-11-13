@@ -10,6 +10,7 @@ struct ReceivedRequest: Sendable {
 struct FakeHerdrServer: Sendable {
     enum Reply: Sendable {
         case result(String)
+        case delayedResult(String, after: Duration)
         case error(code: String, message: String)
         case silence
         case hangUp
@@ -187,6 +188,15 @@ struct FakeHerdrServer: Sendable {
                 state.withLock { _ = $0.subscribers.insert(fd) }
             }
             writeAll(fd, Data(#"{"id":"\#(head.id)","result":\#(json)}"#.utf8 + [0x0A]))
+        case let .delayedResult(json, delay):
+            let source = state.withLock { $0.clients[fd] }
+            let (seconds, attoseconds) = delay.components
+            let interval = Double(seconds) + Double(attoseconds) / 1e18
+            queue.asyncAfter(deadline: .now() + interval) {
+                // Not written when the client already left: its fd may have been reused by another connection.
+                guard let source, state.withLock({ $0.clients[fd] === source }) else { return }
+                writeAll(fd, Data(#"{"id":"\#(head.id)","result":\#(json)}"#.utf8 + [0x0A]))
+            }
         case let .error(code, message):
             writeAll(fd, Data(#"{"id":"\#(head.id)","error":{"code":"\#(code)","message":"\#(message)"}}"#.utf8 + [0x0A]))
         case .silence:

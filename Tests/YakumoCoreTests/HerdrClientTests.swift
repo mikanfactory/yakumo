@@ -101,6 +101,56 @@ private struct EventRecorder: Sendable {
         #expect(error?.code == "timeout")
     }
 
+    @Test func slowCreateUsesTheLongTimeout() async throws {
+        let server = try FakeHerdrServer.started()
+        defer { server.stop() }
+        let created = #"{"type":"worktree_created","workspace":\#(workspaceJSON),"worktree":{}}"#
+        server.setReply(.delayedResult(created, after: .milliseconds(300)), for: "worktree.create")
+        let client = HerdrClient(
+            socketPath: server.path, requestTimeout: .milliseconds(100), worktreeTimeout: .seconds(5))
+
+        let workspace = try await client.createWorktree(WorktreeCreateParams(cwd: "/repo", focus: true))
+
+        #expect(workspace.id == "w1")
+    }
+
+    @Test func slowRemoveUsesTheLongTimeout() async throws {
+        let server = try FakeHerdrServer.started()
+        defer { server.stop() }
+        server.setReply(.delayedResult(#"{"type":"ok"}"#, after: .milliseconds(300)), for: "worktree.remove")
+        let client = HerdrClient(
+            socketPath: server.path, requestTimeout: .milliseconds(100), worktreeTimeout: .seconds(5))
+
+        try await client.removeWorktree(workspaceID: "w4")
+
+        #expect(server.requests(method: "worktree.remove").count == 1)
+    }
+
+    @Test func slowListStillUsesTheShortTimeout() async throws {
+        let server = try FakeHerdrServer.started()
+        defer { server.stop() }
+        let list = #"{"type":"workspace_list","workspaces":[]}"#
+        server.setReply(.delayedResult(list, after: .milliseconds(300)), for: "workspace.list")
+        let client = HerdrClient(
+            socketPath: server.path, requestTimeout: .milliseconds(100), worktreeTimeout: .seconds(5))
+
+        let error = await #expect(throws: HerdrError.self) { try await client.listWorkspaces() }
+        #expect(error?.code == "timeout")
+    }
+
+    @Test func slowCreateTimesOutPastTheLongTimeout() async throws {
+        let server = try FakeHerdrServer.started()
+        defer { server.stop() }
+        server.setReply(.silence, for: "worktree.create")
+        let client = HerdrClient(
+            socketPath: server.path, requestTimeout: .milliseconds(50), worktreeTimeout: .milliseconds(150))
+
+        let error = await #expect(throws: HerdrError.self) {
+            try await client.createWorktree(WorktreeCreateParams(cwd: "/repo", focus: true))
+        }
+        #expect(error?.code == "timeout")
+    }
+
     @Test func focusWorkspaceSendsWorkspaceID() async throws {
         let server = try FakeHerdrServer.started()
         defer { server.stop() }
