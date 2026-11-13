@@ -28,6 +28,12 @@ public enum HerdrWire {
         let error: ErrorBody?
     }
 
+    public static func makeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return decoder
+    }
+
     public static func encodeRequest(id: String, method: String, params: some Encodable) throws -> Data {
         let encoder = JSONEncoder()
         var data = try encoder.encode(Request(id: id, method: method, params: params))

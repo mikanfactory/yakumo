@@ -6,12 +6,6 @@ private struct WorkspaceListResult: Decodable {
     let workspaces: [WorkspaceInfo]
 }
 
-private func decoder() -> JSONDecoder {
-    let decoder = JSONDecoder()
-    decoder.keyDecodingStrategy = .convertFromSnakeCase
-    return decoder
-}
-
 private func fixtureLine() throws -> Data {
     let url = try #require(Bundle.module.url(forResource: "workspace_list", withExtension: "json", subdirectory: "Fixtures"))
     return try Data(contentsOf: url)
@@ -23,7 +17,7 @@ private func fixtureLine() throws -> Data {
         Issue.record("expected result")
         return
     }
-    let list = try decoder().decode(WorkspaceListResult.self, from: json)
+    let list = try HerdrWire.makeDecoder().decode(WorkspaceListResult.self, from: json)
     #expect(list.workspaces.count == 8)
     let target = try #require(list.workspaces.first { $0.label == "worktree-clear-stone-a132" })
     #expect(target.agentStatus == .working)
@@ -33,7 +27,7 @@ private func fixtureLine() throws -> Data {
 
 @Test func unknownAgentStatusFallsBack() throws {
     let json = Data(#"{"workspace_id":"w1","label":"a","number":1,"focused":false,"agent_status":"sleeping"}"#.utf8)
-    let info = try decoder().decode(WorkspaceInfo.self, from: json)
+    let info = try HerdrWire.makeDecoder().decode(WorkspaceInfo.self, from: json)
     #expect(info.agentStatus == .unknown)
     #expect(info.worktree == nil)
     #expect(info.id == "w1")
