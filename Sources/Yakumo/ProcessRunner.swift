@@ -2,7 +2,7 @@ import Foundation
 import os
 import YakumoCore
 
-struct CommandFailedError: Error, CustomStringConvertible {
+struct CommandFailedError: LocalizedError, CustomStringConvertible {
     let command: String
     let status: Int32
     let stderr: String
@@ -11,6 +11,8 @@ struct CommandFailedError: Error, CustomStringConvertible {
         let line = stderr.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         return line.isEmpty ? "\(command) が終了コード \(status) で失敗しました" : line
     }
+
+    var errorDescription: String? { description }
 }
 
 enum ProcessRunner {

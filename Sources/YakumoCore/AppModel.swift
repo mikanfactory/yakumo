@@ -23,6 +23,7 @@ public final class AppModel {
     static let unavailableText = "herdr に接続できません"
     static let notWorktreeText = "この Space は worktree ではないので削除できません"
     static let gitPath = "/usr/bin/git"
+    static let unreadableReplyText = "herdr の応答を読めません"
 
     public private(set) var rows: [ListRow] = []
     public private(set) var cursor = 0
@@ -44,6 +45,7 @@ public final class AppModel {
     @ObservationIgnored private var appliedGeneration = 0
     @ObservationIgnored private var panelTasks: [Task<Void, Never>] = []
     @ObservationIgnored private var prPending: Set<String> = []
+    @ObservationIgnored private var cursorResetAfterGeneration: Int?
 
     public init(
         herdr: any HerdrAPI,
@@ -67,7 +69,7 @@ public final class AppModel {
         do {
             config = try configStore.load()
         } catch {
-            message = "設定ファイルを読めません: \(Self.describe(error))"
+            message = "設定ファイルを読めません: \(error.localizedDescription)"
             config = .default
         }
         rebuildRows()
@@ -91,6 +93,7 @@ public final class AppModel {
             return
         }
         guard panelTasks.isEmpty else { return }
+        cursorResetAfterGeneration = listGeneration
         lookupPRs(force: false)
         panelTasks = [
             repeating(every: statusRefreshInterval, immediately: true) { await $0.reloadWorkspaces() },
@@ -168,7 +171,7 @@ public final class AppModel {
             }.value
             rebuildRows()
         } catch {
-            message = "リポジトリを追加できません: \(Self.describe(error))"
+            message = "リポジトリを追加できません: \(error.localizedDescription)"
         }
     }
 
@@ -193,13 +196,19 @@ public final class AppModel {
             guard generation > appliedGeneration else { return }
             let firstList = appliedGeneration == 0
             appliedGeneration = generation
+            let resetCursor = cursorResetAfterGeneration.map { generation > $0 } ?? false
+            if resetCursor { cursorResetAfterGeneration = nil }
             workspaces = listed
-            rebuildRows(keepSelection: !firstList)
+            rebuildRows(keepSelection: !firstList && !resetCursor)
             if !panelTasks.isEmpty {
                 lookupPRs(force: false, onlyMissing: true)
             }
         } catch {
-            message = Self.describe(error)
+            // Not shown while disconnected: the connection state already says so, and a connect error
+            // on every status tick would cover the message of the last real failure.
+            if connection == .connected {
+                message = Self.describe(error)
+            }
         }
     }
 
@@ -255,8 +264,10 @@ public final class AppModel {
             line
         case NewWorktreeInputError.unexpectedOutput:
             "gh の出力を解釈できません"
+        case is DecodingError:
+            unreadableReplyText
         default:
-            String(describing: error)
+            error.localizedDescription
         }
     }
 }

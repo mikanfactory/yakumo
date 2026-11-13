@@ -62,6 +62,8 @@ private func createRunner(log: CommandLog, fetchStatus: Int32) -> CommandRunner 
 }
 
 private struct ConfigBroken: Error {}
+
+private enum HerdrWireKey: String, CodingKey { case workspaces }
 private struct NotGit: Error {}
 
 @MainActor
@@ -173,12 +175,62 @@ struct AppModelTests {
         let error = DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "bad json"))
         h.herdr.setListError(error)
         h.herdr.send(.changed(kind: "workspace.updated"))
-        #expect(await waitUntil { h.model.message == String(describing: error) })
+        #expect(await waitUntil { h.model.message == "herdr の応答を読めません" })
 
         h.herdr.setListError(nil)
         h.herdr.setWorkspaces([space("w1"), space("w2", number: 2)])
         h.herdr.send(.changed(kind: "workspace.created"))
         #expect(await waitUntil { h.model.rows.contains { $0.id == "w2" } })
+    }
+
+    @Test func listFailureWhileDisconnectedKeepsEarlierMessage() async throws {
+        let h = try await makeHarness(workspaces: [space("w1")], statusInterval: .milliseconds(10))
+        defer { h.task.cancel() }
+        h.herdr.send(.disconnected)
+        #expect(await waitUntil { h.model.connection == .unavailable("herdr に接続できません") })
+        h.model.message = "branch already exists"
+        h.herdr.setListError(HerdrError(code: "connection_failed", message: "connect /x: Connection refused"))
+        let before = h.herdr.listCount
+        h.model.setPanelVisible(true)
+        defer { h.model.setPanelVisible(false) }
+        #expect(await waitUntil { h.herdr.listCount >= before + 3 })
+        #expect(h.model.message == "branch already exists")
+    }
+
+    @Test func otherErrorsUseLocalizedDescription() {
+        let error = CocoaError(.fileReadNoPermission)
+        #expect(AppModel.describe(error) == error.localizedDescription)
+        #expect(AppModel.describe(HerdrError(code: "x", message: "herdr said no")) == "herdr said no")
+        let decoding = DecodingError.keyNotFound(
+            HerdrWireKey.workspaces, .init(codingPath: [], debugDescription: "missing"))
+        #expect(AppModel.describe(decoding) == "herdr の応答を読めません")
+    }
+
+    @Test func unreadableConfigIsNotBlamedOnHerdr() async throws {
+        let store = try makeStore()
+        try FileManager.default.createDirectory(
+            at: store.url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{broken".utf8).write(to: store.url)
+        let h = try await makeHarness(store: store, connect: false)
+        defer { h.task.cancel() }
+        #expect(await waitUntil { h.model.message != nil })
+        #expect(h.model.message?.contains("herdr") == false)
+    }
+
+    @Test func showingPanelMovesCursorToFocusedSpace() async throws {
+        let h = try await makeHarness(workspaces: [
+            space("w1", number: 1, focused: true), space("w2", number: 2), space("w3", number: 3),
+        ])
+        defer { h.task.cancel() }
+        moveCursor(h.model, to: "w2")
+        h.herdr.setWorkspaces([space("w1", number: 1), space("w2", number: 2), space("w3", number: 3, focused: true)])
+        h.model.setPanelVisible(true)
+        defer { h.model.setPanelVisible(false) }
+        #expect(await waitUntil { h.model.rows[h.model.cursor].id == "w3" })
+
+        moveCursor(h.model, to: "w1")
+        await h.model.refresh()
+        #expect(h.model.rows[h.model.cursor].id == "w1")
     }
 
     @Test func rebuildKeepsCursorOnSameRow() async throws {
@@ -552,7 +604,7 @@ struct AppModelTests {
         defer { h.task.cancel() }
         let rows = h.model.rows
         await h.model.addRepository(path: "/tmp/not-git")
-        #expect(h.model.message == "リポジトリを追加できません: \(String(describing: NotGit()))")
+        #expect(h.model.message == "リポジトリを追加できません: \(NotGit().localizedDescription)")
         #expect(h.model.config.repositories.isEmpty)
         #expect(h.model.rows == rows)
     }
