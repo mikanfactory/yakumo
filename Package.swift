@@ -16,6 +16,10 @@ let package = Package(
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
             ]
         ),
-        .testTarget(name: "YakumoCoreTests", dependencies: ["YakumoCore"]),
+        .testTarget(
+            name: "YakumoCoreTests",
+            dependencies: ["YakumoCore"],
+            resources: [.copy("Fixtures")]
+        ),
     ]
 )
