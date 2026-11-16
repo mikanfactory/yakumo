@@ -711,6 +711,22 @@ struct AppModelTests {
         #expect(await holds(for: .milliseconds(100)) { log.notices.count == 2 })
     }
 
+    @Test func reconnectForgetsPreviousStatuses() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", focused: true), space("w2", number: 2)])
+        defer { h.task.cancel() }
+        let log = recordNotices(h.model)
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .done))
+        #expect(await waitUntil { log.notices.count == 1 })
+
+        h.herdr.send(.disconnected)
+        #expect(await waitUntil { h.model.connection != .connected })
+        h.herdr.send(.connected)
+        #expect(await waitUntil { h.model.connection == .connected })
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .done))
+
+        #expect(await waitUntil { log.notices.count == 2 })
+    }
+
     @Test func workingAndIdleRaiseNoNotice() async throws {
         let h = try await makeHarness(workspaces: [space("w1", focused: true), space("w2", number: 2)])
         defer { h.task.cancel() }

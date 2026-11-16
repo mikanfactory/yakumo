@@ -89,6 +89,8 @@ public final class AppModel {
                 await reloadWorkspaces()
             case .disconnected:
                 connection = .unavailable(Self.unavailableText)
+                // Not kept across a herdr restart: pane IDs can be reused, and a stale "done" would hide the next one.
+                agentStatuses = [:]
             case .changed:
                 await reloadWorkspaces()
             }
