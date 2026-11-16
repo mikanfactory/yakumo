@@ -101,19 +101,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func openSettings() {
         let window = settingsWindow ?? makeSettingsWindow()
         // Not reusing the previous view: it would keep showing the repository list from the last open.
-        window.contentViewController = NSHostingController(
+        let controller = NSHostingController(
             rootView: SettingsView(configStore: configStore) { [weak self] in self?.rebuildModel() })
+        window.contentViewController = controller
+        window.setContentSize(controller.view.fittingSize)
         settingsWindow = window
-        NSApp.activate()
         window.center()
         window.makeKeyAndOrderFront(nil)
     }
 
+    // Not a regular window: the terminal behind the non-activating panel never yields activation,
+    // so a regular window opens behind it.
     private func makeSettingsWindow() -> NSWindow {
-        let window = NSWindow(
-            contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let window = KeyablePanel(
+            contentRect: .zero, styleMask: [.titled, .closable, .nonactivatingPanel],
+            backing: .buffered, defer: false)
         window.title = "Yakumo Settings"
         window.isReleasedWhenClosed = false
+        window.isFloatingPanel = true
+        window.level = .floating
+        window.hidesOnDeactivate = false
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         return window
     }
 }

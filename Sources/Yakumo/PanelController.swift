@@ -39,7 +39,7 @@ final class PanelState {
     }
 }
 
-private final class KeyablePanel: NSPanel {
+final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
