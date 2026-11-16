@@ -64,6 +64,32 @@ private struct EventRecorder: Sendable {
         #expect(workspaces.first?.id == "w1")
     }
 
+    @Test func listWorktreesSendsCwdAndDecodes() async throws {
+        let server = try FakeHerdrServer.started()
+        defer { server.stop() }
+        server.setReply(.result(#"{"type":"worktree_list","source":{"repo_root":"/r"},"worktrees":[{"path":"/r","branch":"main","is_bare":false,"is_detached":false,"is_prunable":false,"is_linked_worktree":false,"open_workspace_id":"w1","label":"r"},{"path":"/w/x","branch":null,"is_bare":false,"is_detached":true,"is_prunable":false,"is_linked_worktree":true,"label":"r"}]}"#), for: "worktree.list")
+
+        let entries = try await HerdrClient(socketPath: server.path).listWorktrees(repoRoot: "/r")
+
+        struct CwdParams: Decodable { let cwd: String }
+        #expect(server.requests.map(\.method) == ["worktree.list"])
+        #expect(try params(server.requests.first, as: CwdParams.self).cwd == "/r")
+        #expect(entries == [
+            WorktreeEntry(path: "/r", branch: "main", isDetached: false, isLinkedWorktree: false),
+            WorktreeEntry(path: "/w/x", branch: nil, isDetached: true, isLinkedWorktree: true),
+        ])
+    }
+
+    @Test func listWorktreesErrorThrowsHerdrError() async throws {
+        let server = try FakeHerdrServer.started()
+        defer { server.stop() }
+        server.setReply(.error(code: "not_git_worktree", message: "not a git work tree"), for: "worktree.list")
+
+        await #expect(throws: HerdrError(code: "not_git_worktree", message: "not a git work tree")) {
+            try await HerdrClient(socketPath: server.path).listWorktrees(repoRoot: "/tmp")
+        }
+    }
+
     @Test func errorResponseThrowsHerdrError() async throws {
         let server = try FakeHerdrServer.started()
         defer { server.stop() }

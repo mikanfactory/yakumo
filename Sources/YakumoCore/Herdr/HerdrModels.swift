@@ -9,6 +9,20 @@ public enum AgentStatus: String, Decodable, Sendable {
     }
 }
 
+public struct WorktreeEntry: Decodable, Equatable, Sendable {
+    public let path: String
+    public let branch: String?
+    public let isDetached: Bool
+    public let isLinkedWorktree: Bool
+
+    public init(path: String, branch: String?, isDetached: Bool, isLinkedWorktree: Bool) {
+        self.path = path
+        self.branch = branch
+        self.isDetached = isDetached
+        self.isLinkedWorktree = isLinkedWorktree
+    }
+}
+
 public struct WorktreeInfo: Decodable, Equatable, Sendable {
     public let checkoutPath: String
     public let isLinkedWorktree: Bool
