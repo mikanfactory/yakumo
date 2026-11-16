@@ -650,4 +650,138 @@ struct AppModelTests {
         #expect(h.model.config.repositories.isEmpty)
         #expect(h.model.rows == rows)
     }
+
+    private func recordNotices(_ model: AppModel) -> NoticeLog {
+        let log = NoticeLog()
+        model.onNotice = { log.notices.append($0) }
+        return log
+    }
+
+    @Test func doneInBackgroundWorkspaceRaisesNotice() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", focused: true), space("w2", number: 2, linked: false)])
+        defer { h.task.cancel() }
+        h.herdr.setWorktrees(
+            [WorktreeEntry(path: "/wt/w2", branch: "feat/x", isDetached: false, isLinkedWorktree: false)], for: "/repo")
+        let log = recordNotices(h.model)
+
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .done))
+
+        #expect(await waitUntil { log.notices.count == 1 })
+        #expect(log.notices == [AgentNotice(
+            paneID: "w2:p1", workspaceID: "w2", name: "repo", detail: "feat/x", isRepository: true, status: .done)])
+        #expect(log.notices.first?.statusText == "完了")
+    }
+
+    @Test func blockedRaisesNoticeWithWaitingText() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", focused: true), space("w2", number: 2)])
+        defer { h.task.cancel() }
+        let log = recordNotices(h.model)
+
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .blocked))
+
+        #expect(await waitUntil { log.notices.count == 1 })
+        #expect(log.notices.first?.detail == "label-w2")
+        #expect(log.notices.first?.statusText == "入力待ち")
+    }
+
+    @Test func workspaceWithoutWorktreeShowsLabelOnly() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", focused: true), space("w2", number: 2, root: nil)])
+        defer { h.task.cancel() }
+        let log = recordNotices(h.model)
+
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .done))
+
+        #expect(await waitUntil { log.notices.count == 1 })
+        #expect(log.notices.first?.name == "label-w2")
+        #expect(log.notices.first?.detail == nil)
+        #expect(log.notices.first?.isRepository == false)
+    }
+
+    @Test func repeatedStatusRaisesOneNotice() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", focused: true), space("w2", number: 2)])
+        defer { h.task.cancel() }
+        let log = recordNotices(h.model)
+
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .done))
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .done))
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .working))
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .done))
+
+        #expect(await waitUntil { log.notices.count == 2 })
+        #expect(await holds(for: .milliseconds(100)) { log.notices.count == 2 })
+    }
+
+    @Test func workingAndIdleRaiseNoNotice() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", focused: true), space("w2", number: 2)])
+        defer { h.task.cancel() }
+        let log = recordNotices(h.model)
+
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .working))
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .idle))
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p2", workspaceID: "w2", status: .blocked))
+
+        #expect(await waitUntil { log.notices.map(\.paneID) == ["w2:p2"] })
+    }
+
+    @Test func focusedWorkspaceRaisesNoNotice() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", focused: true), space("w2", number: 2)])
+        defer { h.task.cancel() }
+        let log = recordNotices(h.model)
+
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w1:p1", workspaceID: "w1", status: .done))
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w9:p1", workspaceID: "w9", status: .done))
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .done))
+
+        #expect(await waitUntil { log.notices.map(\.paneID) == ["w2:p1"] })
+    }
+
+    @Test func noticeUsesFreshFocus() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", focused: true), space("w2", number: 2)])
+        defer { h.task.cancel() }
+        let log = recordNotices(h.model)
+        h.herdr.setWorkspaces([space("w1"), space("w2", number: 2, focused: true)])
+
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w2:p1", workspaceID: "w2", status: .done))
+        h.herdr.sendAgent(AgentStatusChange(paneID: "w1:p1", workspaceID: "w1", status: .done))
+
+        #expect(await waitUntil { log.notices.map(\.paneID) == ["w1:p1"] })
+    }
+
+    @Test func openNoticeFocusesAgentPane() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", focused: true), space("w2", number: 2)])
+        defer { h.task.cancel() }
+        let notice = AgentNotice(paneID: "w2:p1", workspaceID: "w2", name: "repo", detail: nil, isRepository: true, status: .done)
+
+        #expect(await h.model.openNotice(notice))
+
+        #expect(h.herdr.calls.contains(.focusAgent("w2:p1")))
+        #expect(!h.herdr.calls.contains(.focus("w2")))
+    }
+
+    @Test func openNoticeFallsBackToWorkspace() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", focused: true), space("w2", number: 2)])
+        defer { h.task.cancel() }
+        h.herdr.setFocusAgentError(HerdrError(code: "pane_not_found", message: "gone"))
+        let notice = AgentNotice(paneID: "w2:p1", workspaceID: "w2", name: "repo", detail: nil, isRepository: true, status: .done)
+
+        #expect(await h.model.openNotice(notice))
+
+        #expect(h.herdr.calls.contains(.focus("w2")))
+    }
+
+    @Test func openNoticeReportsWhenNothingCanBeFocused() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", focused: true)])
+        defer { h.task.cancel() }
+        h.herdr.setFocusAgentError(HerdrError(code: "pane_not_found", message: "gone"))
+        h.herdr.setFocusError(HerdrError(code: "workspace_not_found", message: "workspace gone"))
+        let notice = AgentNotice(paneID: "w2:p1", workspaceID: "w2", name: "repo", detail: nil, isRepository: true, status: .done)
+
+        #expect(await h.model.openNotice(notice) == false)
+        #expect(h.model.message == "workspace gone")
+    }
+}
+
+@MainActor
+private final class NoticeLog {
+    var notices: [AgentNotice] = []
 }

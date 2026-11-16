@@ -32,6 +32,7 @@ public final class AppModel {
     public private(set) var pr: [String: PRLookup] = [:]
     public private(set) var config: YakumoConfig = .default
     public private(set) var checkouts: [String: WorktreeEntry] = [:]
+    @ObservationIgnored public var onNotice: (@MainActor (AgentNotice) -> Void)?
 
     @ObservationIgnored private let herdr: any HerdrAPI
     @ObservationIgnored private let configStore: ConfigStore
@@ -47,6 +48,7 @@ public final class AppModel {
     @ObservationIgnored private var panelTasks: [Task<Void, Never>] = []
     @ObservationIgnored private var prPending: Set<String> = []
     @ObservationIgnored private var cursorResetAfterGeneration: Int?
+    @ObservationIgnored private var agentStatuses: [String: AgentStatus] = [:]
 
     public init(
         herdr: any HerdrAPI,
@@ -74,6 +76,12 @@ public final class AppModel {
             config = .default
         }
         rebuildRows()
+        let agentWatch = Task { [herdr] in
+            for await change in herdr.agentStatusChanges() {
+                await self.receiveAgentStatus(change)
+            }
+        }
+        defer { agentWatch.cancel() }
         for await event in herdr.events() {
             switch event {
             case .connected:
@@ -110,6 +118,21 @@ public final class AppModel {
         guard case .space(let workspace) = currentRow else { return false }
         do {
             try await herdr.focusWorkspace(id: workspace.id)
+            return true
+        } catch {
+            message = Self.describe(error)
+            return false
+        }
+    }
+
+    public func openNotice(_ notice: AgentNotice) async -> Bool {
+        do {
+            try await herdr.focusAgent(paneID: notice.paneID)
+            return true
+        } catch {}
+        // Not given up on: the pane may have closed since the notice, but its workspace is still worth opening.
+        do {
+            try await herdr.focusWorkspace(id: notice.workspaceID)
             return true
         } catch {
             message = Self.describe(error)
@@ -217,6 +240,21 @@ public final class AppModel {
                 message = Self.describe(error)
             }
         }
+    }
+
+    private func receiveAgentStatus(_ change: AgentStatusChange) async {
+        let previous = agentStatuses.updateValue(change.status, forKey: change.paneID)
+        guard AgentNotice.raisingStatuses.contains(change.status), previous != change.status else { return }
+        await reloadWorkspaces()
+        guard let workspace = workspaces.first(where: { $0.id == change.workspaceID }), !workspace.focused else { return }
+        onNotice?(AgentNotice(
+            paneID: change.paneID,
+            workspaceID: workspace.id,
+            name: workspace.worktree?.repoName ?? workspace.label,
+            detail: workspace.worktree == nil ? nil : title(for: workspace),
+            isRepository: workspace.worktree != nil,
+            status: change.status
+        ))
     }
 
     private func fetchCheckouts(for workspaces: [WorkspaceInfo]) async -> [String: WorktreeEntry] {
