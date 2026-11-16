@@ -1,6 +1,0 @@
-sidebar_width: 30
-default_base_ref: origin/main
-
-repositories:
-  - name: yakumo
-    path: /Users/shoji/code/yakumo

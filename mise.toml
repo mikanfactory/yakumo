@@ -1,26 +1,15 @@
-[tools]
-go = "1.24"
-
 [tasks.build]
-description = "Build worktree-ui binary"
-run = "go build -o bin/worktree-ui ./cmd/worktree-ui"
+description = "Build the Swift package"
+run = "swift build"
 
 [tasks.test]
-description = "Run tests with verbose output"
-run = "go test ./... -v"
+description = "Run tests with coverage"
+run = "make test"
 
-[tasks.coverage]
-description = "Run tests with coverage report"
-run = """
-go test ./... -coverprofile=coverage.out
-go tool cover -func=coverage.out
-"""
-
-[tasks.run]
-depends = ["build"]
-description = "Build and run worktree-ui"
-run = "./bin/worktree-ui --config config.yaml"
+[tasks.app]
+description = "Build build/Yakumo.app"
+run = "make app"
 
 [tasks.clean]
 description = "Remove build artifacts"
-run = "rm -rf bin coverage.out"
+run = "make clean"

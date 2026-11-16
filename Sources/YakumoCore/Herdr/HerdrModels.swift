@@ -1,0 +1,72 @@
+import Foundation
+
+public enum AgentStatus: String, Decodable, Sendable {
+    case idle, working, blocked, done, unknown
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = AgentStatus(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct WorktreeInfo: Decodable, Equatable, Sendable {
+    public let checkoutPath: String
+    public let isLinkedWorktree: Bool
+    public let repoName: String
+    public let repoRoot: String
+
+    public init(checkoutPath: String, isLinkedWorktree: Bool, repoName: String, repoRoot: String) {
+        self.checkoutPath = checkoutPath
+        self.isLinkedWorktree = isLinkedWorktree
+        self.repoName = repoName
+        self.repoRoot = repoRoot
+    }
+}
+
+public struct WorkspaceInfo: Decodable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let label: String
+    public let number: Int
+    public let focused: Bool
+    public let agentStatus: AgentStatus
+    public let worktree: WorktreeInfo?
+
+    public init(id: String, label: String, number: Int, focused: Bool, agentStatus: AgentStatus, worktree: WorktreeInfo?) {
+        self.id = id
+        self.label = label
+        self.number = number
+        self.focused = focused
+        self.agentStatus = agentStatus
+        self.worktree = worktree
+    }
+
+    // convertFromSnakeCase rewrites "workspace_id" to "workspaceId" before key matching.
+    private enum CodingKeys: String, CodingKey {
+        case id = "workspaceId"
+        case label, number, focused, agentStatus, worktree
+    }
+}
+
+public struct WorktreeCreateParams: Encodable, Equatable, Sendable {
+    public var cwd: String?
+    public var branch: String?
+    public var base: String?
+    public var focus: Bool
+
+    public init(cwd: String? = nil, branch: String? = nil, base: String? = nil, focus: Bool) {
+        self.cwd = cwd
+        self.branch = branch
+        self.base = base
+        self.focus = focus
+    }
+}
+
+public struct HerdrError: Error, Equatable, Sendable {
+    public let code: String
+    public let message: String
+
+    public init(code: String, message: String) {
+        self.code = code
+        self.message = message
+    }
+}
