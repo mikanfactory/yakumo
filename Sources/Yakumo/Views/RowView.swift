@@ -40,14 +40,18 @@ struct RowView: View {
                     .frame(width: 3, height: 16)
             }
             Text(title ?? workspace.label).lineLimit(1).truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
             if case .found(let info) = pr {
-                Spacer(minLength: 8)
-                Text("#\(String(info.number))").font(.system(size: 12)).foregroundStyle(.secondary)
-                if let ci = CITone(info.ciSummary) {
-                    Pulsing(active: ci.pulses) {
-                        Circle().fill(PanelColors.ci(ci)).frame(width: 8, height: 8)
+                Text("#\(String(info.number))").font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+                Group {
+                    if let ci = CITone(info.ciSummary) {
+                        Pulsing(active: ci.pulses) {
+                            Circle().fill(PanelColors.ci(ci)).frame(width: 8, height: 8)
+                        }
                     }
                 }
+                // Not dropped when CI is absent: the fixed slot keeps every #number on the same right edge.
+                .frame(width: 8)
             }
         case .addWorktree:
             Label("Add worktree", systemImage: "plus").foregroundStyle(.secondary)

@@ -2,28 +2,17 @@ import SwiftUI
 import YakumoCore
 
 struct PRDetailView: View {
-    private static let commentPrefixLength = 80
-
     let lookup: PRLookup?
     let isWorktree: Bool
     let onOpen: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             switch lookup {
             case .found(let info):
-                HStack {
-                    Text("#\(info.number) \(info.title)").lineLimit(1)
-                    Spacer()
-                    Text(info.mergeStateText).foregroundStyle(.secondary)
-                }
-                if !info.checks.isEmpty {
-                    Text(info.checks.map { "\(Self.checkSymbol($0)) \($0.name)" }.joined(separator: "  "))
-                        .lineLimit(2)
-                }
-                if let comment = info.comments.first {
-                    Text("コメント \(comment.author): \(Self.prefix(of: comment.body))")
-                        .foregroundStyle(.secondary).lineLimit(2)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("#\(String(info.number))").foregroundStyle(.secondary).monospacedDigit()
+                    Text(info.title).fixedSize(horizontal: false, vertical: true)
                 }
                 Button("PR を開く", action: onOpen)
             case .some(.none):
@@ -34,17 +23,7 @@ struct PRDetailView: View {
                 Text(isWorktree ? "PR を取得中…" : " ").foregroundStyle(.secondary)
             }
         }
+        .font(.system(size: 13))
         .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
-    }
-
-    static func checkSymbol(_ check: PRCheck) -> String {
-        if check.isFailure { return "✗" }
-        if check.isSuccess { return "✓" }
-        return "…"
-    }
-
-    static func prefix(of body: String) -> String {
-        let flat = body.split(whereSeparator: \.isNewline).joined(separator: " ")
-        return flat.count > commentPrefixLength ? String(flat.prefix(commentPrefixLength)) + "…" : flat
     }
 }
