@@ -77,8 +77,8 @@ public final class AppModel {
         }
         rebuildRows()
         let agentWatch = Task { [herdr] in
-            for await change in herdr.agentStatusChanges() {
-                await self.receiveAgentStatus(change)
+            for await event in herdr.agentStatusEvents() {
+                await self.receiveAgentStatus(event)
             }
         }
         defer { agentWatch.cancel() }
@@ -89,8 +89,6 @@ public final class AppModel {
                 await reloadWorkspaces()
             case .disconnected:
                 connection = .unavailable(Self.unavailableText)
-                // Not kept across a herdr restart: pane IDs can be reused, and a stale "done" would hide the next one.
-                agentStatuses = [:]
             case .changed:
                 await reloadWorkspaces()
             }
@@ -244,17 +242,26 @@ public final class AppModel {
         }
     }
 
-    private func receiveAgentStatus(_ change: AgentStatusChange) async {
+    private func receiveAgentStatus(_ event: AgentStatusEvent) async {
+        let change: AgentStatusChange
+        switch event {
+        case .baseline(let statuses):
+            agentStatuses = statuses
+            return
+        case .changed(let changed):
+            change = changed
+        }
         let previous = agentStatuses.updateValue(change.status, forKey: change.paneID)
         guard AgentNotice.raisingStatuses.contains(change.status), previous != change.status else { return }
-        await reloadWorkspaces()
-        guard let workspace = workspaces.first(where: { $0.id == change.workspaceID }), !workspace.focused else { return }
+        // Not a full reload: only the focus is needed fresh, and the cached branch names save a git run per repo.
+        guard let listed = try? await herdr.listWorkspaces(),
+              let workspace = listed.first(where: { $0.id == change.workspaceID }), !workspace.focused
+        else { return }
         onNotice?(AgentNotice(
             paneID: change.paneID,
             workspaceID: workspace.id,
             name: workspace.worktree?.repoName ?? workspace.label,
             detail: workspace.worktree == nil ? nil : title(for: workspace),
-            isRepository: workspace.worktree != nil,
             status: change.status
         ))
     }

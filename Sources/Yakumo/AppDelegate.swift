@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let runner = ProcessRunner.commandRunner()
     private var statusItem: NSStatusItem?
     private var panel: PanelController?
-    private let notices = NoticeController()
+    private lazy var notices = NoticeController(runner: runner)
     private var startTask: Task<Void, Never>?
     private var settingsWindow: NSWindow?
 

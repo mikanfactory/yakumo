@@ -11,12 +11,17 @@ final class NoticeController {
     private static let limit = 3
     private static let lifetime: Duration = .seconds(8)
     private static let screenInset: CGFloat = 4
-    private nonisolated static let psPath = "/bin/ps"
+    private static let psPath = "/bin/ps"
 
+    private let runner: CommandRunner
     private var model: AppModel?
     private var stack = NoticeStack(limit: NoticeController.limit)
     private var panels: [String: NoticePanel] = [:]
     private var expiries: [String: Task<Void, Never>] = [:]
+
+    init(runner: CommandRunner) {
+        self.runner = runner
+    }
 
     func attach(_ model: AppModel) {
         self.model = model
@@ -25,7 +30,7 @@ final class NoticeController {
 
     func show(_ notice: AgentNotice) {
         for dropped in stack.push(notice) { close(id: dropped) }
-        panels[notice.id]?.orderOut(nil)
+        close(id: notice.id)
         let panel = makePanel(for: notice)
         panels[notice.id] = panel
         layout(newest: notice.id)
@@ -104,14 +109,12 @@ final class NoticeController {
         guard let model else { return }
         Task {
             guard await model.openNotice(notice) else { return }
-            await Self.activateTerminal()
+            await activateTerminal()
         }
     }
 
-    private static func activateTerminal() async {
-        let output = await Task.detached {
-            try? ProcessRunner.run(psPath, ["-axo", "pid=,ppid=,comm="], cwd: NSHomeDirectory())
-        }.value
+    private func activateTerminal() async {
+        let output = try? await runner.run(Self.psPath, ["-axo", "pid=,ppid=,comm="], NSHomeDirectory())
         guard let output, output.status == 0 else { return }
         let ps = String(decoding: output.stdout, as: UTF8.self)
         let host = TerminalHost.find(psOutput: ps) { NSRunningApplication(processIdentifier: $0) != nil }

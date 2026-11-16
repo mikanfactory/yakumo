@@ -61,19 +61,9 @@ public struct WorkspaceInfo: Decodable, Equatable, Identifiable, Sendable {
     }
 }
 
-public struct PaneInfo: Decodable, Equatable, Sendable {
-    public let paneID: String
-    public let workspaceID: String
-
-    public init(paneID: String, workspaceID: String) {
-        self.paneID = paneID
-        self.workspaceID = workspaceID
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case paneID = "paneId"
-        case workspaceID = "workspaceId"
-    }
+public enum AgentStatusEvent: Equatable, Sendable {
+    case baseline([String: AgentStatus])
+    case changed(AgentStatusChange)
 }
 
 public struct AgentStatusChange: Decodable, Equatable, Sendable {

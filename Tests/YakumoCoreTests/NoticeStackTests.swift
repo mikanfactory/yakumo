@@ -2,7 +2,7 @@ import Testing
 @testable import YakumoCore
 
 private func notice(_ pane: String, _ status: AgentStatus = .done) -> AgentNotice {
-    AgentNotice(paneID: pane, workspaceID: "w", name: "repo", detail: nil, isRepository: true, status: status)
+    AgentNotice(paneID: pane, workspaceID: "w", name: "repo", detail: nil, status: status)
 }
 
 @Suite struct NoticeStackTests {

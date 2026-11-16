@@ -3,19 +3,19 @@ public struct AgentNotice: Equatable, Identifiable, Sendable {
     public let workspaceID: String
     public let name: String
     public let detail: String?
-    public let isRepository: Bool
     public let status: AgentStatus
 
-    public init(paneID: String, workspaceID: String, name: String, detail: String?, isRepository: Bool, status: AgentStatus) {
+    public init(paneID: String, workspaceID: String, name: String, detail: String?, status: AgentStatus) {
         self.paneID = paneID
         self.workspaceID = workspaceID
         self.name = name
         self.detail = detail
-        self.isRepository = isRepository
         self.status = status
     }
 
     public var id: String { paneID }
+
+    public var isRepository: Bool { detail != nil }
 
     public var statusText: String {
         status == .blocked ? "入力待ち" : "完了"

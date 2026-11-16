@@ -10,10 +10,12 @@ struct NoticeCardView: View {
     let onHover: (Bool) -> Void
     @State private var hovering = false
 
+    private var tint: Color { PanelColors.status(StatusTone(agent: notice.status)) }
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             RoundedRectangle(cornerRadius: 1.5)
-                .fill(PanelColors.status(StatusTone(agent: notice.status)))
+                .fill(tint)
                 .frame(width: 3)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
@@ -22,7 +24,7 @@ struct NoticeCardView: View {
                         .lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 4)
                     Text(notice.statusText).font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(PanelColors.status(StatusTone(agent: notice.status)))
+                        .foregroundStyle(tint)
                 }
                 if let detail = notice.detail {
                     Text(detail).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)

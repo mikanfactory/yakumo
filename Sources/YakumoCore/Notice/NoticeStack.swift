@@ -1,5 +1,5 @@
 public struct NoticeStack: Sendable {
-    public let limit: Int
+    private let limit: Int
     public private(set) var notices: [AgentNotice] = []
 
     public init(limit: Int) {

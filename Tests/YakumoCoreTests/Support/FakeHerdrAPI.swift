@@ -28,12 +28,12 @@ final class FakeHerdrAPI: HerdrAPI {
     private let state = OSAllocatedUnfairLock(initialState: State())
     private let stream: AsyncStream<HerdrEvent>
     private let continuation: AsyncStream<HerdrEvent>.Continuation
-    private let agentStream: AsyncStream<AgentStatusChange>
-    private let agentContinuation: AsyncStream<AgentStatusChange>.Continuation
+    private let agentStream: AsyncStream<AgentStatusEvent>
+    private let agentContinuation: AsyncStream<AgentStatusEvent>.Continuation
 
     init(workspaces: [WorkspaceInfo] = []) {
         (stream, continuation) = AsyncStream.makeStream(of: HerdrEvent.self)
-        (agentStream, agentContinuation) = AsyncStream.makeStream(of: AgentStatusChange.self)
+        (agentStream, agentContinuation) = AsyncStream.makeStream(of: AgentStatusEvent.self)
         state.withLock { $0.workspaces = workspaces }
     }
 
@@ -45,7 +45,8 @@ final class FakeHerdrAPI: HerdrAPI {
         continuation.finish()
         agentContinuation.finish()
     }
-    func sendAgent(_ change: AgentStatusChange) { agentContinuation.yield(change) }
+    func sendAgent(_ change: AgentStatusChange) { agentContinuation.yield(.changed(change)) }
+    func sendBaseline(_ statuses: [String: AgentStatus]) { agentContinuation.yield(.baseline(statuses)) }
     func setFocusAgentError(_ error: (any Error)?) { state.withLock { $0.focusAgentError = error } }
 
     func setWorkspaces(_ workspaces: [WorkspaceInfo]) { state.withLock { $0.workspaces = workspaces } }
@@ -105,8 +106,6 @@ final class FakeHerdrAPI: HerdrAPI {
         return entries
     }
 
-    func listPanes() async throws -> [PaneInfo] { [] }
-
     func focusAgent(paneID: String) async throws {
         let error = state.withLock { s in
             s.calls.append(.focusAgent(paneID))
@@ -117,5 +116,5 @@ final class FakeHerdrAPI: HerdrAPI {
 
     func events() -> AsyncStream<HerdrEvent> { stream }
 
-    func agentStatusChanges() -> AsyncStream<AgentStatusChange> { agentStream }
+    func agentStatusEvents() -> AsyncStream<AgentStatusEvent> { agentStream }
 }

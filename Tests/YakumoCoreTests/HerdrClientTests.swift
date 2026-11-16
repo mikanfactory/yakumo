@@ -354,16 +354,6 @@ private let paneListJSON = #"{"panes":[{"pane_id":"w1:p1","workspace_id":"w1","a
         #expect(try await waitUntil { server.subscriberCount == 0 })
     }
 
-    @Test func listPanesSendsMethodAndDecodes() async throws {
-        let server = try FakeHerdrServer.started()
-        defer { server.stop() }
-        server.setReply(.result(paneListJSON), for: "pane.list")
-
-        let panes = try await HerdrClient(socketPath: server.path).listPanes()
-
-        #expect(panes == [PaneInfo(paneID: "w1:p1", workspaceID: "w1"), PaneInfo(paneID: "w2:p1", workspaceID: "w2")])
-    }
-
     @Test func focusAgentSendsPaneAsTarget() async throws {
         let server = try FakeHerdrServer.started()
         defer { server.stop() }
@@ -378,7 +368,7 @@ private let paneListJSON = #"{"panes":[{"pane_id":"w1:p1","workspace_id":"w1","a
         let server = try FakeHerdrServer.started()
         defer { server.stop() }
         server.setReply(.result(paneListJSON), for: "pane.list")
-        let recorder = Recorder(HerdrClient(socketPath: server.path).agentStatusChanges())
+        let recorder = Recorder(HerdrClient(socketPath: server.path).agentStatusEvents())
         defer { recorder.cancel() }
 
         #expect(try await waitUntil { server.subscriberCount == 1 })
@@ -390,18 +380,21 @@ private let paneListJSON = #"{"panes":[{"pane_id":"w1:p1","workspace_id":"w1","a
         ])
     }
 
-    @Test func agentStatusEventIsYielded() async throws {
+    @Test func agentStreamStartsWithBaselineThenChanges() async throws {
         let server = try FakeHerdrServer.started()
         defer { server.stop() }
         server.setReply(.result(paneListJSON), for: "pane.list")
-        let recorder = Recorder(HerdrClient(socketPath: server.path).agentStatusChanges())
+        let recorder = Recorder(HerdrClient(socketPath: server.path).agentStatusEvents())
         defer { recorder.cancel() }
         #expect(try await waitUntil { server.subscriberCount == 1 })
 
         server.broadcast(#"{"event":"pane.agent_status_changed","data":{"agent":"claude","agent_status":"done","pane_id":"w1:p1","workspace_id":"w1"}}"#)
 
         #expect(try await waitUntil {
-            recorder.events == [AgentStatusChange(paneID: "w1:p1", workspaceID: "w1", status: .done)]
+            recorder.events == [
+                .baseline(["w1:p1": .idle, "w2:p1": .unknown]),
+                .changed(AgentStatusChange(paneID: "w1:p1", workspaceID: "w1", status: .done)),
+            ]
         })
     }
 
@@ -409,7 +402,7 @@ private let paneListJSON = #"{"panes":[{"pane_id":"w1:p1","workspace_id":"w1","a
         let server = try FakeHerdrServer.started()
         defer { server.stop() }
         server.setReply(.result(paneListJSON), for: "pane.list")
-        let recorder = Recorder(HerdrClient(socketPath: server.path, reconnectInterval: .seconds(60)).agentStatusChanges())
+        let recorder = Recorder(HerdrClient(socketPath: server.path, reconnectInterval: .seconds(60)).agentStatusEvents())
         defer { recorder.cancel() }
         #expect(try await waitUntil { server.subscriberCount == 1 })
 
@@ -427,7 +420,7 @@ private let paneListJSON = #"{"panes":[{"pane_id":"w1:p1","workspace_id":"w1","a
         server.setReply(.result(paneListJSON), for: "pane.list")
         server.setReply(.error(code: "pane_not_found", message: "pane w2:p1 not found"), for: "events.subscribe")
         let recorder = Recorder(
-            HerdrClient(socketPath: server.path, reconnectInterval: .milliseconds(20)).agentStatusChanges())
+            HerdrClient(socketPath: server.path, reconnectInterval: .milliseconds(20)).agentStatusEvents())
         defer { recorder.cancel() }
 
         #expect(try await waitUntil { server.requests(method: "events.subscribe").count >= 2 })
@@ -441,7 +434,7 @@ private let paneListJSON = #"{"panes":[{"pane_id":"w1:p1","workspace_id":"w1","a
         defer { server.stop() }
         server.setReply(.error(code: "internal", message: "boom"), for: "pane.list")
         let recorder = Recorder(
-            HerdrClient(socketPath: server.path, reconnectInterval: .milliseconds(20)).agentStatusChanges())
+            HerdrClient(socketPath: server.path, reconnectInterval: .milliseconds(20)).agentStatusEvents())
         defer { recorder.cancel() }
 
         #expect(try await waitUntil { server.requests(method: "pane.list").count >= 2 })
@@ -452,7 +445,7 @@ private let paneListJSON = #"{"panes":[{"pane_id":"w1:p1","workspace_id":"w1","a
         let server = try FakeHerdrServer.started()
         defer { server.stop() }
         server.setReply(.result(paneListJSON), for: "pane.list")
-        let recorder = Recorder(HerdrClient(socketPath: server.path).agentStatusChanges())
+        let recorder = Recorder(HerdrClient(socketPath: server.path).agentStatusEvents())
         #expect(try await waitUntil { server.subscriberCount == 1 })
 
         recorder.cancel()
