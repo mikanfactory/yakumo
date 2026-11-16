@@ -17,11 +17,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let runner = ProcessRunner.commandRunner()
     private var statusItem: NSStatusItem?
     private var panel: PanelController?
+    private lazy var notices = NoticeController(runner: runner)
     private var startTask: Task<Void, Never>?
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let model = makeModel()
+        notices.attach(model)
         panel = PanelController(model: model) { [weak self] in self?.openSettings() }
         startTask = Task { await model.start() }
         installMainMenu()
@@ -47,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func rebuildModel() {
         startTask?.cancel()
         let model = makeModel()
+        notices.attach(model)
         panel?.replaceModel(model)
         startTask = Task { await model.start() }
     }

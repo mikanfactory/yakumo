@@ -13,7 +13,9 @@ public protocol HerdrAPI: Sendable {
     func createWorktree(_ params: WorktreeCreateParams) async throws -> WorkspaceInfo
     func removeWorktree(workspaceID: String) async throws
     func listWorktrees(repoRoot: String) async throws -> [WorktreeEntry]
+    func focusAgent(paneID: String) async throws
     func events() -> AsyncStream<HerdrEvent>
+    func agentStatusEvents() -> AsyncStream<AgentStatusEvent>
 }
 
 public actor HerdrClient: HerdrAPI {
@@ -22,6 +24,15 @@ public actor HerdrClient: HerdrAPI {
         "workspace.renamed", "workspace.reordered", "worktree.created", "worktree.removed",
         "pane.agent_detected",
     ]
+    static let agentStatusKind = "pane.agent_status_changed"
+    // herdr only accepts status subscriptions per existing pane, so a new or closed pane means subscribing again.
+    static let paneSetKinds = ["pane.created", "pane.closed"]
+    static let paneSetEvents: Set<String> = ["pane_created", "pane_closed"]
+
+    private enum SubscriptionEnd: Equatable {
+        case closed(subscribed: Bool)
+        case resubscribe
+    }
 
     private let socketPath: String
     private let reconnectInterval: Duration
@@ -65,32 +76,79 @@ public actor HerdrClient: HerdrAPI {
         return try HerdrWire.makeDecoder().decode(WorktreeList.self, from: result).worktrees
     }
 
-    public nonisolated func events() -> AsyncStream<HerdrEvent> {
-        let (stream, continuation) = AsyncStream.makeStream(of: HerdrEvent.self)
-        let control = SubscriptionControl()
-        let task = Task.detached { [socketPath, reconnectInterval] in
-            await Self.subscribeUntilCancelled(
-                path: socketPath, interval: reconnectInterval, control: control, continuation: continuation
-            )
-        }
-        continuation.onTermination = { _ in
-            control.cancel()
-            task.cancel()
-        }
-        return stream
+    public func focusAgent(paneID: String) async throws {
+        _ = try await request("agent.focus", AgentTarget(target: paneID), timeout: requestTimeout)
     }
 
-    private func request(_ method: String, _ params: some Encodable, timeout: Duration) async throws -> Data {
+    public nonisolated func events() -> AsyncStream<HerdrEvent> {
+        let items = Self.subscribedEventKinds.map { SubscribeParams.Item(type: $0) }
+        return Self.makeStream { [socketPath, reconnectInterval] control, continuation in
+            var announcedDisconnect = false
+            await Self.retryUntilCancelled(interval: reconnectInterval, control: control) { attempt in
+                Self.runSubscription(
+                    path: socketPath, requestID: "subscribe-\(attempt)", items: items, control: control,
+                    onSubscribed: { continuation.yield(.connected) },
+                    onEvent: { kind, _ in
+                        continuation.yield(.changed(kind: kind))
+                        return false
+                    }
+                )
+            } onClosed: { subscribed in
+                if subscribed { announcedDisconnect = false }
+                guard !announcedDisconnect else { return }
+                continuation.yield(.disconnected)
+                announcedDisconnect = true
+            }
+        }
+    }
+
+    public nonisolated func agentStatusEvents() -> AsyncStream<AgentStatusEvent> {
+        Self.makeStream { [socketPath, reconnectInterval, requestTimeout] control, continuation in
+            await Self.retryUntilCancelled(interval: reconnectInterval, control: control) { attempt in
+                let panes: [PaneEntry]
+                do {
+                    let result = try Self.requestSync(
+                        path: socketPath, id: "panes-\(attempt)", method: "pane.list", params: EmptyParams(),
+                        timeout: requestTimeout)
+                    panes = try HerdrWire.makeDecoder().decode(PaneList.self, from: result).panes
+                } catch {
+                    return .closed(subscribed: false)
+                }
+                let items = Self.paneSetKinds.map { SubscribeParams.Item(type: $0) }
+                    + panes.map { SubscribeParams.Item(type: Self.agentStatusKind, paneID: $0.paneID) }
+                let baseline = Dictionary(panes.map { ($0.paneID, $0.agentStatus) }, uniquingKeysWith: { $1 })
+                return Self.runSubscription(
+                    path: socketPath, requestID: "agents-\(attempt)", items: items, control: control,
+                    onSubscribed: { continuation.yield(.baseline(baseline)) },
+                    onEvent: { kind, data in
+                        if Self.paneSetEvents.contains(kind) { return true }
+                        if kind == Self.agentStatusKind,
+                           let change = try? HerdrWire.makeDecoder().decode(AgentStatusChange.self, from: data) {
+                            continuation.yield(.changed(change))
+                        }
+                        return false
+                    }
+                )
+            } onClosed: { _ in }
+        }
+    }
+
+    private func request(_ method: String, _ params: some Encodable & Sendable, timeout: Duration) async throws -> Data {
         nextRequestID += 1
         let id = String(nextRequestID)
-        let line = try HerdrWire.encodeRequest(id: id, method: method, params: params)
-        let message = try await offload { [socketPath] in
-            var socket = try UnixSocket.connect(path: socketPath, timeout: timeout)
-            defer { socket.close() }
-            try socket.write(line)
-            return try Self.awaitReply(id: id, on: &socket)
+        return try await offload { [socketPath] in
+            try Self.requestSync(path: socketPath, id: id, method: method, params: params, timeout: timeout)
         }
-        switch message {
+    }
+
+    private static func requestSync(
+        path: String, id: String, method: String, params: some Encodable, timeout: Duration
+    ) throws -> Data {
+        let line = try HerdrWire.encodeRequest(id: id, method: method, params: params)
+        var socket = try UnixSocket.connect(path: path, timeout: timeout)
+        defer { socket.close() }
+        try socket.write(line)
+        switch try awaitReply(id: id, on: &socket) {
         case let .result(_, json):
             return json
         case let .error(_, code, message):
@@ -113,66 +171,77 @@ public actor HerdrClient: HerdrAPI {
         throw HerdrError(code: "connection_closed", message: "herdr closed the connection before replying")
     }
 
-    private static func subscribeUntilCancelled(
-        path: String, interval: Duration, control: SubscriptionControl, continuation: AsyncStream<HerdrEvent>.Continuation
+    private static func makeStream<Element: Sendable>(
+        _ run: @escaping @Sendable (SubscriptionControl, AsyncStream<Element>.Continuation) async -> Void
+    ) -> AsyncStream<Element> {
+        let (stream, continuation) = AsyncStream.makeStream(of: Element.self)
+        let control = SubscriptionControl()
+        let task = Task.detached {
+            await run(control, continuation)
+            continuation.finish()
+        }
+        continuation.onTermination = { _ in
+            control.cancel()
+            task.cancel()
+        }
+        return stream
+    }
+
+    private static func retryUntilCancelled(
+        interval: Duration, control: SubscriptionControl,
+        attempt: @escaping @Sendable (Int) -> SubscriptionEnd,
+        onClosed: (_ subscribed: Bool) -> Void
     ) async {
-        var announcedDisconnect = false
-        var attempt = 0
+        var count = 0
         while !control.isCancelled {
-            attempt += 1
-            let id = "subscribe-\(attempt)"
-            let connected = await offload {
-                streamEvents(path: path, requestID: id, control: control, continuation: continuation)
-            }
-            if connected {
-                announcedDisconnect = false
-            }
+            count += 1
+            let current = count
+            let end = await offload { attempt(current) }
             guard !control.isCancelled else { break }
-            if !announcedDisconnect {
-                continuation.yield(.disconnected)
-                announcedDisconnect = true
-            }
+            guard case let .closed(subscribed) = end else { continue }
+            onClosed(subscribed)
             do {
                 try await Task.sleep(for: interval)
             } catch {
                 break
             }
         }
-        continuation.finish()
     }
 
-    private static func streamEvents(
-        path: String, requestID: String, control: SubscriptionControl, continuation: AsyncStream<HerdrEvent>.Continuation
-    ) -> Bool {
-        guard var socket = try? UnixSocket.connect(path: path, timeout: nil) else { return false }
+    // onEvent returns true when the subscription has to be rebuilt.
+    private static func runSubscription(
+        path: String, requestID: String, items: [SubscribeParams.Item], control: SubscriptionControl,
+        onSubscribed: () -> Void, onEvent: (_ kind: String, _ data: Data) -> Bool
+    ) -> SubscriptionEnd {
+        guard var socket = try? UnixSocket.connect(path: path, timeout: nil) else { return .closed(subscribed: false) }
         guard control.register(socket) else {
             socket.close()
-            return false
+            return .closed(subscribed: false)
         }
         defer {
             control.unregister()
             socket.close()
         }
-        var connected = false
+        var subscribed = false
         do {
-            let subscriptions = SubscribeParams(subscriptions: subscribedEventKinds.map(SubscribeParams.Item.init))
-            try socket.write(HerdrWire.encodeRequest(id: requestID, method: "events.subscribe", params: subscriptions))
+            try socket.write(HerdrWire.encodeRequest(
+                id: requestID, method: "events.subscribe", params: SubscribeParams(subscriptions: items)))
             while let line = try socket.readLine() {
                 switch try? HerdrWire.decodeLine(line) {
                 case let .result(id, _) where id == requestID:
-                    connected = true
-                    continuation.yield(.connected)
+                    subscribed = true
+                    onSubscribed()
                 case let .error(_, code, message):
                     logger.error("herdr subscription error \(code, privacy: .public): \(message, privacy: .public)")
-                    return connected
-                case let .event(kind, _) where connected:
-                    continuation.yield(.changed(kind: kind))
+                    return .closed(subscribed: subscribed)
+                case let .event(kind, data) where subscribed:
+                    if onEvent(kind, data) { return .resubscribe }
                 default:
                     continue
                 }
             }
         } catch {}
-        return connected
+        return .closed(subscribed: subscribed)
     }
 }
 
@@ -193,6 +262,12 @@ private struct WorkspaceParams: Encodable {
 private struct SubscribeParams: Encodable {
     struct Item: Encodable {
         let type: String
+        var paneID: String?
+
+        enum CodingKeys: String, CodingKey {
+            case type
+            case paneID = "pane_id"
+        }
     }
 
     let subscriptions: [Item]
@@ -204,6 +279,24 @@ private struct WorkspaceList: Decodable {
 
 private struct WorktreeCreated: Decodable {
     let workspace: WorkspaceInfo
+}
+
+private struct AgentTarget: Encodable {
+    let target: String
+}
+
+private struct PaneEntry: Decodable {
+    let paneID: String
+    let agentStatus: AgentStatus
+
+    private enum CodingKeys: String, CodingKey {
+        case paneID = "paneId"
+        case agentStatus
+    }
+}
+
+private struct PaneList: Decodable {
+    let panes: [PaneEntry]
 }
 
 private struct CwdParams: Encodable {

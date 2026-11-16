@@ -9,6 +9,7 @@ final class FakeHerdrAPI: HerdrAPI {
         case create(WorktreeCreateParams)
         case remove(String)
         case listWorktrees(String)
+        case focusAgent(String)
     }
 
     private struct State {
@@ -21,14 +22,18 @@ final class FakeHerdrAPI: HerdrAPI {
         var removeError: (any Error)?
         var worktrees: [String: [WorktreeEntry]] = [:]
         var worktreesErrors: [String: any Error] = [:]
+        var focusAgentError: (any Error)?
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
     private let stream: AsyncStream<HerdrEvent>
     private let continuation: AsyncStream<HerdrEvent>.Continuation
+    private let agentStream: AsyncStream<AgentStatusEvent>
+    private let agentContinuation: AsyncStream<AgentStatusEvent>.Continuation
 
     init(workspaces: [WorkspaceInfo] = []) {
         (stream, continuation) = AsyncStream.makeStream(of: HerdrEvent.self)
+        (agentStream, agentContinuation) = AsyncStream.makeStream(of: AgentStatusEvent.self)
         state.withLock { $0.workspaces = workspaces }
     }
 
@@ -36,7 +41,13 @@ final class FakeHerdrAPI: HerdrAPI {
     var listCount: Int { calls.filter { $0 == .list }.count }
 
     func send(_ event: HerdrEvent) { continuation.yield(event) }
-    func finish() { continuation.finish() }
+    func finish() {
+        continuation.finish()
+        agentContinuation.finish()
+    }
+    func sendAgent(_ change: AgentStatusChange) { agentContinuation.yield(.changed(change)) }
+    func sendBaseline(_ statuses: [String: AgentStatus]) { agentContinuation.yield(.baseline(statuses)) }
+    func setFocusAgentError(_ error: (any Error)?) { state.withLock { $0.focusAgentError = error } }
 
     func setWorkspaces(_ workspaces: [WorkspaceInfo]) { state.withLock { $0.workspaces = workspaces } }
     func setListError(_ error: (any Error)?) { state.withLock { $0.listError = error } }
@@ -95,5 +106,15 @@ final class FakeHerdrAPI: HerdrAPI {
         return entries
     }
 
+    func focusAgent(paneID: String) async throws {
+        let error = state.withLock { s in
+            s.calls.append(.focusAgent(paneID))
+            return s.focusAgentError
+        }
+        if let error { throw error }
+    }
+
     func events() -> AsyncStream<HerdrEvent> { stream }
+
+    func agentStatusEvents() -> AsyncStream<AgentStatusEvent> { agentStream }
 }

@@ -63,7 +63,7 @@ struct RowView: View {
     }
 }
 
-private struct RepoAvatar: View {
+struct RepoAvatar: View {
     let name: String
     let isOther: Bool
 
