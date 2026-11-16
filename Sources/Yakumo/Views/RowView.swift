@@ -55,8 +55,6 @@ struct RowView: View {
             }
         case .addWorktree:
             Label("Add worktree", systemImage: "plus").foregroundStyle(.secondary)
-        case .addRepository:
-            Label("Add repository", systemImage: "plus.circle").foregroundStyle(.secondary)
         case .settings:
             Label("Settings", systemImage: "gearshape").foregroundStyle(.secondary)
         }

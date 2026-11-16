@@ -8,7 +8,7 @@ struct CursorTests {
     }
 
     private var rows: [ListRow] {
-        [.repoHeader(name: "A", root: "/a"), space("a1"), space("a2"), .repoHeader(name: "B", root: "/b"), space("b1"), .addRepository]
+        [.repoHeader(name: "A", root: "/a"), space("a1"), space("a2"), .repoHeader(name: "B", root: "/b"), space("b1"), .settings]
     }
 
     @Test func cursorSkipsHeadersAndClamps() {

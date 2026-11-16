@@ -5,7 +5,6 @@ import YakumoCore
 
 enum InputKind: Equatable {
     case newWorktree(repoRoot: String)
-    case addRepository
 }
 
 enum PanelMode: Equatable {
@@ -21,30 +20,17 @@ final class PanelState {
     var inputText = ""
     var progress: String?
 
-    var completions: [String] {
-        guard mode == .input(.addRepository) else { return [] }
-        return PathCompleter.complete(inputText, home: NSHomeDirectory())
-    }
-
     func begin(_ kind: InputKind) {
         inputText = ""
         mode = .input(kind)
     }
-
-    func completeInput() {
-        let candidates = completions
-        guard let first = candidates.first else { return }
-        let common = candidates.dropFirst().reduce(first) { $0.commonPrefix(with: $1) }
-        inputText = common.count > inputText.count ? common : first
-    }
 }
 
-private final class KeyablePanel: NSPanel {
+final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
 private enum KeyCode {
-    static let tab: UInt16 = 48
     static let returnKey: UInt16 = 36
     static let keypadEnter: UInt16 = 76
     static let escape: UInt16 = 53
@@ -158,7 +144,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         else { return false }
         switch state.mode {
         case .list: return handleListKey(event)
-        case .input(let kind): return handleInputKey(event, kind: kind)
+        case .input: return handleInputKey(event)
         case .confirmRemove(let confirmation): return handleConfirmKey(event, confirmation: confirmation)
         }
     }
@@ -178,7 +164,6 @@ final class PanelController: NSObject, NSWindowDelegate {
             case "d": if let confirmation = model.requestRemove() { state.mode = .confirmRemove(confirmation) }
             case "o": openPR()
             case "r": Task { await model.refresh() }
-            case "a": state.begin(.addRepository)
             case ",": showSettings()
             default: return false
             }
@@ -186,15 +171,12 @@ final class PanelController: NSObject, NSWindowDelegate {
         return true
     }
 
-    private func handleInputKey(_ event: NSEvent, kind: InputKind) -> Bool {
+    private func handleInputKey(_ event: NSEvent) -> Bool {
         // Not intercepted while the IME is composing: esc and tab belong to the conversion then.
         if let editor = panel.firstResponder as? NSTextView, editor.hasMarkedText() { return false }
         switch event.keyCode {
         case KeyCode.escape:
             state.mode = .list
-            return true
-        case KeyCode.tab where kind == .addRepository:
-            state.completeInput()
             return true
         default:
             return false
@@ -229,7 +211,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 if await model.activate() { hide(restoringFocus: true) }
             }
         case .addWorktree(let repoRoot): state.begin(.newWorktree(repoRoot: repoRoot))
-        case .addRepository: state.begin(.addRepository)
         case .settings: showSettings()
         case .repoHeader, nil: break
         }
@@ -258,9 +239,6 @@ final class PanelController: NSObject, NSWindowDelegate {
                 await model.createWorktree(repoRoot: repoRoot, input: text)
                 state.progress = nil
             }
-        case .addRepository:
-            guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-            Task { await model.addRepository(path: text) }
         }
     }
 

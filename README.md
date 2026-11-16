@@ -25,7 +25,6 @@ make install   # ~/Applications/Yakumo.app にコピーする
 |---|---|---|
 | `default_base_ref` | `origin/main` | worktree 作成の基準にする ref |
 | `gh_path` | `~/.local/share/mise/shims/gh` | gh のパス（`~` は展開される） |
-| `repositories` | `[]` | 管理するリポジトリの一覧 |
 
 ## Usage
 
@@ -39,7 +38,6 @@ make install   # ~/Applications/Yakumo.app にコピーする
 | `d` | worktree を削除する（linked worktree のみ。ブランチは残る） |
 | `o` | PR をブラウザで開く |
 | `r` | 一覧と PR を取り直す |
-| `a` | リポジトリを追加する |
 | `,` | Settings を開く |
 | `esc` | パネルを閉じる |
 

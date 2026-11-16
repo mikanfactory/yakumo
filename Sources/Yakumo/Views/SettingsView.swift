@@ -24,21 +24,6 @@ struct SettingsView: View {
                 TextField("default_base_ref", text: $config.defaultBaseRef)
                 Button("保存", action: saveFields)
             }
-            Section("登録リポジトリ") {
-                if config.repositories.isEmpty {
-                    Text("なし（パネルで a を押して追加）").foregroundStyle(.secondary)
-                }
-                ForEach(config.repositories, id: \.path) { repository in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(repository.name)
-                            Text(repository.path).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("削除") { remove(repository) }
-                    }
-                }
-            }
             if let status {
                 Text(status).foregroundStyle(.secondary)
             }
@@ -57,21 +42,8 @@ struct SettingsView: View {
     }
 
     private func saveFields() {
-        let edited = config
-        update { $0.ghPath = edited.ghPath; $0.defaultBaseRef = edited.defaultBaseRef }
-    }
-
-    private func remove(_ repository: RepositoryDef) {
-        update { $0.repositories.removeAll { $0.path == repository.path } }
-    }
-
-    // Starts from the file rather than the form, so a repository added from the panel meanwhile is not dropped.
-    private func update(_ change: (inout YakumoConfig) -> Void) {
         do {
-            var latest = try configStore.load()
-            change(&latest)
-            try configStore.save(latest)
-            config = latest
+            try configStore.save(config)
             status = "保存しました"
             onSaved()
         } catch {

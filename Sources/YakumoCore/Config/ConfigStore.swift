@@ -21,20 +21,4 @@ public struct ConfigStore: Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         try encoder.encode(config).write(to: url, options: .atomic)
     }
-
-    public func addRepository(
-        path: String,
-        gitToplevel: (String) throws -> String
-    ) throws -> YakumoConfig {
-        let expanded = (path as NSString).expandingTildeInPath
-        let toplevel = (try gitToplevel(expanded) as NSString).standardizingPath
-        var config = try load()
-        guard !config.repositories.contains(where: { $0.path == toplevel }) else {
-            return config
-        }
-        let name = (toplevel as NSString).lastPathComponent
-        config.repositories.append(RepositoryDef(name: name, path: toplevel))
-        try save(config)
-        return config
-    }
 }

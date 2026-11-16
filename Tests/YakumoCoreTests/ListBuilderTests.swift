@@ -12,73 +12,64 @@ struct ListBuilderTests {
 
     @Test func groupsByRepoRootNotName() {
         let rows = ListBuilder.build(
-            repositories: [],
             workspaces: [space("a", number: 1, root: "/x/app"), space("b", number: 2, root: "/y/app")]
         )
-        #expect(rows.filter { if case .repoHeader = $0 { return true } else { return false } }.count == 2)
-        #expect(rows[0] == .repoHeader(name: "app", root: "/x/app"))
-        #expect(rows[1].id == "a")
-        #expect(rows[2] == .repoHeader(name: "app", root: "/y/app"))
-        #expect(rows[3].id == "b")
-    }
-
-    @Test func registeredReposKeepOrderAndSortSpacesByNumber() {
-        let repos = [RepositoryDef(name: "B", path: "/b"), RepositoryDef(name: "A", path: "/a/")]
-        let rows = ListBuilder.build(
-            repositories: repos,
-            workspaces: [space("a2", number: 3, root: "/a"), space("b1", number: 1, root: "/b"), space("a1", number: 2, root: "/a")]
-        )
-        #expect(rows.map(\.id) == [
-            "repo:/b", "b1", "add:/b",
-            "repo:/a", "a1", "a2", "add:/a",
-            "addRepository", "settings",
-        ])
-    }
-
-    @Test func registeredRepoWithoutSpacesStillShown() {
-        let rows = ListBuilder.build(repositories: [RepositoryDef(name: "A", path: "/a")], workspaces: [])
         #expect(rows == [
-            .repoHeader(name: "A", root: "/a"),
-            .addWorktree(repoRoot: "/a"),
-            .addRepository,
+            .repoHeader(name: "app", root: "/x/app"), rows[1], .addWorktree(repoRoot: "/x/app"),
+            .repoHeader(name: "app", root: "/y/app"), rows[4], .addWorktree(repoRoot: "/y/app"),
             .settings,
         ])
+        #expect(rows[1].id == "a")
+        #expect(rows[4].id == "b")
     }
 
-    @Test func trailingSlashInRepoRootStillMatches() {
+    @Test func reposKeepFirstAppearanceOrderAndSortSpacesByNumber() {
         let rows = ListBuilder.build(
-            repositories: [RepositoryDef(name: "A", path: "/a")],
-            workspaces: [space("s", number: 1, root: "/a/")]
+            workspaces: [
+                space("a2", number: 3, root: "/a", repoName: "A"),
+                space("b1", number: 1, root: "/b", repoName: "B"),
+                space("a1", number: 2, root: "/a", repoName: "A"),
+            ]
         )
-        #expect(rows.map(\.id) == ["repo:/a", "s", "add:/a", "addRepository", "settings"])
+        #expect(rows.map(\.id) == [
+            "repo:/a", "a1", "a2", "add:/a",
+            "repo:/b", "b1", "add:/b",
+            "settings",
+        ])
     }
 
-    @Test func unregisteredAndNonGitGoLast() {
+    @Test func noWorkspacesLeavesOnlySettings() {
+        #expect(ListBuilder.build(workspaces: []) == [.settings])
+    }
+
+    @Test func trailingSlashInRepoRootMergesIntoOneGroup() {
         let rows = ListBuilder.build(
-            repositories: [RepositoryDef(name: "A", path: "/a")],
+            workspaces: [space("s1", number: 1, root: "/a"), space("s2", number: 2, root: "/a/")]
+        )
+        #expect(rows.map(\.id) == ["repo:/a", "s1", "s2", "add:/a", "settings"])
+    }
+
+    @Test func nonGitGoesLastWithoutAddWorktree() {
+        let rows = ListBuilder.build(
             workspaces: [
                 space("none", number: 1, root: nil),
-                space("other", number: 2, root: "/o", repoName: "other"),
-                space("a", number: 3, root: "/a"),
+                space("a", number: 2, root: "/a", repoName: "A"),
             ]
         )
         #expect(rows == [
             .repoHeader(name: "A", root: "/a"), rows[1], .addWorktree(repoRoot: "/a"),
-            .repoHeader(name: "other", root: "/o"), rows[4],
-            .repoHeader(name: "その他", root: nil), rows[6],
-            .addRepository, .settings,
+            .repoHeader(name: "その他", root: nil), rows[4],
+            .settings,
         ])
         #expect(rows[1].id == "a")
-        #expect(rows[4].id == "other")
-        #expect(rows[6].id == "none")
+        #expect(rows[4].id == "none")
     }
 
     @Test func rowIdsAreUniqueAndStableAcrossRebuilds() {
-        let repos = [RepositoryDef(name: "A", path: "/a")]
         let spaces = [space("none", number: 1, root: nil), space("o", number: 2, root: "/o"), space("a", number: 3, root: "/a")]
-        let rows = ListBuilder.build(repositories: repos, workspaces: spaces)
+        let rows = ListBuilder.build(workspaces: spaces)
         #expect(Set(rows.map(\.id)).count == rows.count)
-        #expect(rows.map(\.id) == ListBuilder.build(repositories: repos, workspaces: spaces).map(\.id))
+        #expect(rows.map(\.id) == ListBuilder.build(workspaces: spaces).map(\.id))
         #expect(rows.contains { $0.id == "repo:other" })
     }
 }

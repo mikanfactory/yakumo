@@ -38,7 +38,6 @@ public final class AppModel {
     @ObservationIgnored private let configStore: ConfigStore
     @ObservationIgnored private let prFetcher: PRFetcher
     @ObservationIgnored private let runner: CommandRunner
-    @ObservationIgnored private let gitToplevel: @Sendable (String) throws -> String
     @ObservationIgnored private let statusRefreshInterval: Duration
     @ObservationIgnored private let prRefreshInterval: Duration
 
@@ -55,7 +54,6 @@ public final class AppModel {
         configStore: ConfigStore,
         prFetcher: PRFetcher,
         runner: CommandRunner,
-        gitToplevel: @escaping @Sendable (String) throws -> String,
         statusRefreshInterval: Duration = .seconds(2),
         prRefreshInterval: Duration = .seconds(30)
     ) {
@@ -63,7 +61,6 @@ public final class AppModel {
         self.configStore = configStore
         self.prFetcher = prFetcher
         self.runner = runner
-        self.gitToplevel = gitToplevel
         self.statusRefreshInterval = statusRefreshInterval
         self.prRefreshInterval = prRefreshInterval
     }
@@ -185,20 +182,6 @@ public final class AppModel {
         lookupPRs(force: true)
     }
 
-    public func addRepository(path: String) async {
-        let store = configStore
-        let toplevel = gitToplevel
-        do {
-            // Not run on the main actor: gitToplevel shells out to git and would freeze the panel.
-            config = try await Task.detached {
-                try store.addRepository(path: path, gitToplevel: toplevel)
-            }.value
-            rebuildRows()
-        } catch {
-            message = "リポジトリを追加できません: \(error.localizedDescription)"
-        }
-    }
-
     public func prURLForCursor() -> URL? {
         guard case .space(let workspace) = currentRow,
               let path = workspace.worktree?.checkoutPath,
@@ -288,7 +271,7 @@ public final class AppModel {
 
     private func rebuildRows(keepSelection: Bool = true) {
         let selectedID = keepSelection ? currentRow?.id : nil
-        rows = ListBuilder.build(repositories: config.repositories, workspaces: workspaces)
+        rows = ListBuilder.build(workspaces: workspaces)
         if let selectedID, let index = rows.firstIndex(where: { $0.id == selectedID }) {
             cursor = index
         } else {
