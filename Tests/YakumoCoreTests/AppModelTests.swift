@@ -158,6 +158,48 @@ struct AppModelTests {
         #expect(h.herdr.listCount == 2)
     }
 
+    @Test func reloadFetchesWorktreesPerRepoOnce() async throws {
+        let h = try await makeHarness(workspaces: [
+            space("w1", root: "/a"), space("w2", number: 2, root: "/a"), space("w3", number: 3, root: "/b"),
+        ])
+        defer { h.task.cancel() }
+        #expect(await waitUntil { h.herdr.calls.filter { if case .listWorktrees = $0 { true } else { false } }.count == 2 })
+        let roots = h.herdr.calls.compactMap { call -> String? in
+            if case .listWorktrees(let root) = call { root } else { nil }
+        }
+        #expect(Set(roots) == ["/a", "/b"])
+    }
+
+    @Test func primaryRowTitleIsBranch() async throws {
+        let primary = space("w1", root: "/repo", checkout: "/repo", linked: false)
+        let h = try await makeHarness(workspaces: [primary])
+        defer { h.task.cancel() }
+        h.herdr.setWorktrees(
+            [WorktreeEntry(path: "/repo", branch: "main", isDetached: false, isLinkedWorktree: false)], for: "/repo")
+        h.herdr.send(.changed(kind: "workspace.updated"))
+        #expect(await waitUntil { h.model.title(for: primary) == "main" })
+    }
+
+    @Test func worktreeListFailureKeepsLabelAndNoMessage() async throws {
+        let primary = space("w1", root: "/repo", checkout: "/repo", linked: false)
+        let h = try await makeHarness(workspaces: [primary])
+        defer { h.task.cancel() }
+        h.herdr.setWorktreesError(HerdrError(code: "not_git_worktree", message: "not a git work tree"), for: "/repo")
+        h.herdr.send(.changed(kind: "workspace.updated"))
+        #expect(await waitUntil { h.herdr.listCount >= 2 })
+        #expect(await holds(for: .milliseconds(100)) { h.model.message == nil })
+        #expect(h.model.rows.contains { $0.id == "w1" })
+        #expect(h.model.title(for: primary) == "label-w1")
+    }
+
+    @Test func nonGitWorkspaceIsNotQueried() async throws {
+        let h = try await makeHarness(workspaces: [space("w1", root: nil)])
+        defer { h.task.cancel() }
+        #expect(await holds(for: .milliseconds(100)) {
+            !h.herdr.calls.contains { if case .listWorktrees = $0 { true } else { false } }
+        })
+    }
+
     @Test func listFailureKeepsRowsAndShowsMessage() async throws {
         let h = try await makeHarness(workspaces: [space("w1")])
         defer { h.task.cancel() }
