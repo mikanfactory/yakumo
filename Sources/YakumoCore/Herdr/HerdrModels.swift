@@ -61,6 +61,39 @@ public struct WorkspaceInfo: Decodable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct PaneInfo: Decodable, Equatable, Sendable {
+    public let paneID: String
+    public let workspaceID: String
+
+    public init(paneID: String, workspaceID: String) {
+        self.paneID = paneID
+        self.workspaceID = workspaceID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case paneID = "paneId"
+        case workspaceID = "workspaceId"
+    }
+}
+
+public struct AgentStatusChange: Decodable, Equatable, Sendable {
+    public let paneID: String
+    public let workspaceID: String
+    public let status: AgentStatus
+
+    public init(paneID: String, workspaceID: String, status: AgentStatus) {
+        self.paneID = paneID
+        self.workspaceID = workspaceID
+        self.status = status
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case paneID = "paneId"
+        case workspaceID = "workspaceId"
+        case status = "agentStatus"
+    }
+}
+
 public struct WorktreeCreateParams: Encodable, Equatable, Sendable {
     public var cwd: String?
     public var branch: String?
