@@ -8,6 +8,7 @@ final class FakeHerdrAPI: HerdrAPI {
         case focus(String)
         case create(WorktreeCreateParams)
         case remove(String)
+        case listWorktrees(String)
     }
 
     private struct State {
@@ -18,6 +19,8 @@ final class FakeHerdrAPI: HerdrAPI {
         var createResult: WorkspaceInfo?
         var createError: (any Error)?
         var removeError: (any Error)?
+        var worktrees: [String: [WorktreeEntry]] = [:]
+        var worktreesErrors: [String: any Error] = [:]
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -41,6 +44,12 @@ final class FakeHerdrAPI: HerdrAPI {
     func setCreateResult(_ workspace: WorkspaceInfo) { state.withLock { $0.createResult = workspace } }
     func setCreateError(_ error: (any Error)?) { state.withLock { $0.createError = error } }
     func setRemoveError(_ error: (any Error)?) { state.withLock { $0.removeError = error } }
+    func setWorktrees(_ entries: [WorktreeEntry], for repoRoot: String) {
+        state.withLock { $0.worktrees[repoRoot] = entries }
+    }
+    func setWorktreesError(_ error: (any Error)?, for repoRoot: String) {
+        state.withLock { $0.worktreesErrors[repoRoot] = error }
+    }
 
     func listWorkspaces() async throws -> [WorkspaceInfo] {
         let (workspaces, error) = state.withLock { s in
@@ -75,6 +84,15 @@ final class FakeHerdrAPI: HerdrAPI {
             return s.removeError
         }
         if let error { throw error }
+    }
+
+    func listWorktrees(repoRoot: String) async throws -> [WorktreeEntry] {
+        let (entries, error) = state.withLock { s in
+            s.calls.append(.listWorktrees(repoRoot))
+            return (s.worktrees[repoRoot] ?? [], s.worktreesErrors[repoRoot])
+        }
+        if let error { throw error }
+        return entries
     }
 
     func events() -> AsyncStream<HerdrEvent> { stream }

@@ -55,11 +55,16 @@ struct PanelView: View {
     private var rowList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
-                        RowView(row: row, selected: index == model.cursor, pr: lookup(for: row)).id(row.id)
+                        if case .addRepository = row {
+                            Divider().padding(.vertical, 6)
+                        }
+                        RowView(row: row, title: title(for: row), selected: index == model.cursor, pr: lookup(for: row))
+                            .id(row.id)
                     }
                 }
+                .font(.system(size: 13))
                 .padding(.horizontal, 8).padding(.vertical, 6)
             }
             .onChange(of: model.cursor) { _, cursor in
@@ -104,6 +109,11 @@ struct PanelView: View {
 
     private var currentLookup: PRLookup? {
         currentCheckoutPath.flatMap { model.pr[$0] }
+    }
+
+    private func title(for row: ListRow) -> String? {
+        guard case .space(let workspace) = row else { return nil }
+        return model.title(for: workspace)
     }
 
     private func lookup(for row: ListRow) -> PRLookup? {

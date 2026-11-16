@@ -31,6 +31,7 @@ public final class AppModel {
     public var message: String?
     public private(set) var pr: [String: PRLookup] = [:]
     public private(set) var config: YakumoConfig = .default
+    public private(set) var checkouts: [String: WorktreeEntry] = [:]
 
     @ObservationIgnored private let herdr: any HerdrAPI
     @ObservationIgnored private let configStore: ConfigStore
@@ -183,6 +184,10 @@ public final class AppModel {
         return URL(string: info.url)
     }
 
+    public func title(for workspace: WorkspaceInfo) -> String {
+        SpaceTitle.title(for: workspace, checkouts: checkouts)
+    }
+
     private var currentRow: ListRow? {
         rows.indices.contains(cursor) ? rows[cursor] : nil
     }
@@ -192,6 +197,7 @@ public final class AppModel {
         let generation = listGeneration
         do {
             let listed = try await herdr.listWorkspaces()
+            let fetchedCheckouts = await fetchCheckouts(for: listed)
             // An older list that finishes after a newer one would roll the rows back.
             guard generation > appliedGeneration else { return }
             let firstList = appliedGeneration == 0
@@ -199,6 +205,7 @@ public final class AppModel {
             let resetCursor = cursorResetAfterGeneration.map { generation > $0 } ?? false
             if resetCursor { cursorResetAfterGeneration = nil }
             workspaces = listed
+            checkouts = fetchedCheckouts
             rebuildRows(keepSelection: !firstList && !resetCursor)
             if !panelTasks.isEmpty {
                 lookupPRs(force: false, onlyMissing: true)
@@ -209,6 +216,21 @@ public final class AppModel {
             if connection == .connected {
                 message = Self.describe(error)
             }
+        }
+    }
+
+    private func fetchCheckouts(for workspaces: [WorkspaceInfo]) async -> [String: WorktreeEntry] {
+        let roots = Set(workspaces.compactMap(\.worktree?.repoRoot))
+        return await withTaskGroup(of: [WorktreeEntry].self) { [herdr] group in
+            for root in roots {
+                // Not surfaced: a repo herdr cannot list only loses its branch name, the Space still shows.
+                group.addTask { (try? await herdr.listWorktrees(repoRoot: root)) ?? [] }
+            }
+            var merged: [String: WorktreeEntry] = [:]
+            for await entries in group {
+                for entry in entries { merged[SpaceTitle.key(entry.path)] = entry }
+            }
+            return merged
         }
     }
 

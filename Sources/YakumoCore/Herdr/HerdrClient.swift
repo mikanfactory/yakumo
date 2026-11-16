@@ -12,6 +12,7 @@ public protocol HerdrAPI: Sendable {
     func focusWorkspace(id: String) async throws
     func createWorktree(_ params: WorktreeCreateParams) async throws -> WorkspaceInfo
     func removeWorktree(workspaceID: String) async throws
+    func listWorktrees(repoRoot: String) async throws -> [WorktreeEntry]
     func events() -> AsyncStream<HerdrEvent>
 }
 
@@ -57,6 +58,11 @@ public actor HerdrClient: HerdrAPI {
     public func removeWorktree(workspaceID: String) async throws {
         _ = try await request(
             "worktree.remove", WorkspaceParams(workspaceID: workspaceID, force: false), timeout: worktreeTimeout)
+    }
+
+    public func listWorktrees(repoRoot: String) async throws -> [WorktreeEntry] {
+        let result = try await request("worktree.list", CwdParams(cwd: repoRoot), timeout: requestTimeout)
+        return try HerdrWire.makeDecoder().decode(WorktreeList.self, from: result).worktrees
     }
 
     public nonisolated func events() -> AsyncStream<HerdrEvent> {
@@ -198,6 +204,14 @@ private struct WorkspaceList: Decodable {
 
 private struct WorktreeCreated: Decodable {
     let workspace: WorkspaceInfo
+}
+
+private struct CwdParams: Encodable {
+    let cwd: String
+}
+
+private struct WorktreeList: Decodable {
+    let worktrees: [WorktreeEntry]
 }
 
 private struct SubscriptionControl: Sendable {
