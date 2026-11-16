@@ -39,8 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             herdr: HerdrClient(socketPath: Self.herdrSocketPath),
             configStore: configStore,
             prFetcher: prFetcher,
-            runner: runner,
-            gitToplevel: ProcessRunner.gitToplevel
+            runner: runner
         )
     }
 
@@ -100,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func openSettings() {
         let window = settingsWindow ?? makeSettingsWindow()
-        // Not reusing the previous view: it would keep showing the repository list from the last open.
+        // Not reusing the previous view: it would keep the unsaved edits and the status line from the last open.
         let controller = NSHostingController(
             rootView: SettingsView(configStore: configStore) { [weak self] in self?.rebuildModel() })
         window.contentViewController = controller

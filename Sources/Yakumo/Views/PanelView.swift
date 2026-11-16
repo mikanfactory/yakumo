@@ -4,7 +4,7 @@ import YakumoCore
 
 struct PanelView: View {
     private static let messageLifetime: Duration = .seconds(5)
-    private static let keyGuide = "enter 開く  n 新規  d 削除  o PR  r 更新  a 追加  , 設定  esc 閉じる"
+    private static let keyGuide = "enter 開く  n 新規  d 削除  o PR  r 更新  , 設定  esc 閉じる"
 
     let model: AppModel
     let state: PanelState
@@ -57,7 +57,7 @@ struct PanelView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
-                        if case .addRepository = row {
+                        if case .settings = row {
                             Divider().padding(.vertical, 6)
                         }
                         RowView(row: row, title: title(for: row), selected: index == model.cursor, pr: lookup(for: row))

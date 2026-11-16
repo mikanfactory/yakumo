@@ -89,7 +89,6 @@ struct AppModelTests {
         config: YakumoConfig? = nil,
         store: ConfigStore? = nil,
         runner: CommandRunner? = nil,
-        gitToplevel: @escaping @Sendable (String) throws -> String = { $0 },
         statusInterval: Duration = .seconds(60),
         prInterval: Duration = .seconds(60),
         connect: Bool = true
@@ -104,12 +103,12 @@ struct AppModelTests {
         let fetcher = PRFetcher(ghPath: "/gh", runner: ghRunner, now: { ContinuousClock.now })
         let model = AppModel(
             herdr: herdr, configStore: configStore, prFetcher: fetcher, runner: ghRunner,
-            gitToplevel: gitToplevel, statusRefreshInterval: statusInterval, prRefreshInterval: prInterval)
+            statusRefreshInterval: statusInterval, prRefreshInterval: prInterval)
         let task = Task { await model.start() }
         if connect {
             herdr.send(.connected)
             #expect(await waitUntil { model.connection == .connected && herdr.listCount >= 1 })
-            #expect(await waitUntil { model.rows.count == ListBuilder.build(repositories: model.config.repositories, workspaces: workspaces).count })
+            #expect(await waitUntil { model.rows.count == ListBuilder.build(workspaces: workspaces).count })
         }
         return Harness(model: model, herdr: herdr, runnerLog: log, store: configStore, task: task)
     }
@@ -300,7 +299,7 @@ struct AppModelTests {
     @Test func moveCursorSkipsHeaders() async throws {
         let h = try await makeHarness(workspaces: [space("w1", number: 1, root: "/a"), space("w2", number: 2, root: "/b")])
         defer { h.task.cancel() }
-        moveCursor(h.model, to: "w1")
+        moveCursor(h.model, to: "add:/a")
         h.model.moveCursor(1)
         #expect(h.model.rows[h.model.cursor].id == "w2")
     }
@@ -323,7 +322,7 @@ struct AppModelTests {
     @Test func requestRemoveOnNonSpaceRowReturnsNilSilently() async throws {
         let h = try await makeHarness()
         defer { h.task.cancel() }
-        moveCursor(h.model, to: "addRepository")
+        moveCursor(h.model, to: "settings")
         #expect(h.model.requestRemove() == nil)
         #expect(h.model.message == nil)
     }
@@ -385,7 +384,7 @@ struct AppModelTests {
     }
 
     @Test func createNewBranchFallsBackToTheConfiguredBaseRef() async throws {
-        let config = YakumoConfig(repositories: [], defaultBaseRef: "origin/develop", ghPath: "/gh")
+        let config = YakumoConfig(defaultBaseRef: "origin/develop", ghPath: "/gh")
         let log = CommandLog()
         let h = try await makeHarness(config: config, runner: createRunner(log: log, fetchStatus: 128))
         defer { h.task.cancel() }
@@ -470,8 +469,7 @@ struct AppModelTests {
     }
 
     @Test func activateFocusesSpaceOnly() async throws {
-        let h = try await makeHarness(config: YakumoConfig(
-            repositories: [RepositoryDef(name: "repo", path: "/repo")], defaultBaseRef: "origin/main", ghPath: "/gh"))
+        let h = try await makeHarness(workspaces: [space("w1")])
         defer { h.task.cancel() }
         moveCursor(h.model, to: "add:/repo")
         #expect(await h.model.activate() == false)
@@ -608,7 +606,7 @@ struct AppModelTests {
         #expect(h.model.prURLForCursor() == URL(string: "https://github.com/o/r/pull/7"))
         moveCursor(h.model, to: "w2")
         #expect(h.model.prURLForCursor() == nil)
-        moveCursor(h.model, to: "addRepository")
+        moveCursor(h.model, to: "settings")
         #expect(h.model.prURLForCursor() == nil)
     }
 
@@ -623,31 +621,9 @@ struct AppModelTests {
         #expect(h.model.config == .default)
     }
 
-    @Test func configRepositoriesShapeRows() async throws {
-        let config = YakumoConfig(
-            repositories: [RepositoryDef(name: "repo", path: "/repo")], defaultBaseRef: "origin/main", ghPath: "/gh")
-        let h = try await makeHarness(workspaces: [space("w1")], config: config)
+    @Test func workspacesShapeRows() async throws {
+        let h = try await makeHarness(workspaces: [space("w1")])
         defer { h.task.cancel() }
-        #expect(h.model.rows.map(\.id) == ["repo:/repo", "w1", "add:/repo", "addRepository", "settings"])
-    }
-
-    @Test func addRepositoryStoresConfigAndRebuildsRows() async throws {
-        let h = try await makeHarness(workspaces: [space("w1", root: "/code/app")], gitToplevel: { _ in "/code/app" })
-        defer { h.task.cancel() }
-        await h.model.addRepository(path: "/code/app/sub")
-        #expect(h.model.config.repositories == [RepositoryDef(name: "app", path: "/code/app")])
-        #expect(try h.store.load().repositories == [RepositoryDef(name: "app", path: "/code/app")])
-        #expect(h.model.rows.map(\.id) == ["repo:/code/app", "w1", "add:/code/app", "addRepository", "settings"])
-        #expect(h.model.message == nil)
-    }
-
-    @Test func addRepositoryRejectsNonGitPath() async throws {
-        let h = try await makeHarness(gitToplevel: { _ in throw NotGit() })
-        defer { h.task.cancel() }
-        let rows = h.model.rows
-        await h.model.addRepository(path: "/tmp/not-git")
-        #expect(h.model.message == "リポジトリを追加できません: \(NotGit().localizedDescription)")
-        #expect(h.model.config.repositories.isEmpty)
-        #expect(h.model.rows == rows)
+        #expect(h.model.rows.map(\.id) == ["repo:/repo", "w1", "add:/repo", "settings"])
     }
 }

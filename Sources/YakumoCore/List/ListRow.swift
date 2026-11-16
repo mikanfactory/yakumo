@@ -4,7 +4,6 @@ public enum ListRow: Equatable, Identifiable, Sendable {
     case repoHeader(name: String, root: String?)
     case space(WorkspaceInfo)
     case addWorktree(repoRoot: String)
-    case addRepository
     case settings
 
     public var id: String {
@@ -12,7 +11,6 @@ public enum ListRow: Equatable, Identifiable, Sendable {
         case .repoHeader(_, let root): "repo:\(root ?? "other")"
         case .space(let workspace): workspace.id
         case .addWorktree(let repoRoot): "add:\(repoRoot)"
-        case .addRepository: "addRepository"
         case .settings: "settings"
         }
     }

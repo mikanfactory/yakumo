@@ -2,22 +2,8 @@ import Foundation
 import os
 import YakumoCore
 
-struct CommandFailedError: LocalizedError, CustomStringConvertible {
-    let command: String
-    let status: Int32
-    let stderr: String
-
-    var description: String {
-        let line = stderr.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-        return line.isEmpty ? "\(command) が終了コード \(status) で失敗しました" : line
-    }
-
-    var errorDescription: String? { description }
-}
-
 enum ProcessRunner {
     static let searchPath = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
-    private static let gitPath = "/usr/bin/git"
 
     static func commandRunner() -> CommandRunner {
         CommandRunner { executable, args, cwd in
@@ -27,15 +13,6 @@ enum ProcessRunner {
                 }
             }
         }
-    }
-
-    @Sendable
-    static func gitToplevel(_ path: String) throws -> String {
-        let output = try run(gitPath, ["-C", path, "rev-parse", "--show-toplevel"], cwd: NSHomeDirectory())
-        guard output.status == 0 else {
-            throw CommandFailedError(command: "git", status: output.status, stderr: output.stderr)
-        }
-        return String(decoding: output.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func run(_ executable: String, _ args: [String], cwd: String) throws
