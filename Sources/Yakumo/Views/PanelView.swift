@@ -5,6 +5,7 @@ import YakumoCore
 struct PanelView: View {
     private static let messageLifetime: Duration = .seconds(5)
     private static let keyGuide = "enter 開く  n 新規  d 削除  o PR  r 更新  , 設定  esc 閉じる"
+    private static let spacesLabel = "spaces"
 
     let model: AppModel
     let state: PanelState
@@ -36,6 +37,7 @@ struct PanelView: View {
         .font(.system(.body, design: .monospaced))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.regularMaterial)
+        .ignoresSafeArea(.container, edges: .top)
         .task(id: model.message) {
             guard model.message != nil else { return }
             do { try await Task.sleep(for: Self.messageLifetime) } catch { return }
@@ -44,12 +46,42 @@ struct PanelView: View {
     }
 
     private var header: some View {
-        HStack {
-            Text("yakumo").bold()
-            Spacer()
-            Text(KeyboardShortcuts.getShortcut(for: .togglePanel)?.description ?? "").foregroundStyle(.secondary)
+        let summary = StatusSummary(rows: model.rows)
+        return HStack(spacing: 12) {
+            if summary.entries.isEmpty {
+                if summary.total > 0 {
+                    Text("\(summary.total) \(Self.spacesLabel)").foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(summary.entries, id: \.tone) { entry in
+                    HStack(spacing: 5) {
+                        Circle().fill(PanelColors.status(entry.tone)).frame(width: 8, height: 8)
+                        Text("\(entry.count) \(Self.label(for: entry.tone))")
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            if let shortcut = KeyboardShortcuts.getShortcut(for: .togglePanel) {
+                Text(shortcut.description)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
+            }
         }
-        .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 6)
+        .font(.system(size: 12))
+        .monospacedDigit()
+        .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+
+    private static func label(for tone: StatusTone) -> String {
+        switch tone {
+        case .working: "working"
+        case .blocked: "blocked"
+        case .done: "done"
+        case .idle: "idle"
+        case .none: ""
+        }
     }
 
     private var rowList: some View {
@@ -57,11 +89,15 @@ struct PanelView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(model.rows.enumerated()), id: \.element.id) { index, row in
-                        if case .settings = row {
-                            Divider().padding(.vertical, 6)
+                        VStack(alignment: .leading, spacing: 0) {
+                            if case .settings = row {
+                                Divider().padding(.vertical, 6)
+                            }
+                            RowView(
+                                row: row, title: title(for: row), selected: index == model.cursor, pr: lookup(for: row))
                         }
-                        RowView(row: row, title: title(for: row), selected: index == model.cursor, pr: lookup(for: row))
-                            .id(row.id)
+                        // Not on RowView alone: scrollTo would stop at the divider, which carries the ForEach id too.
+                        .id(row.id)
                     }
                 }
                 .font(.system(size: 13))
